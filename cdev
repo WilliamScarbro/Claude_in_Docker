@@ -102,6 +102,30 @@ def ensure_global_config(config):
     return config
 
 
+# ── Project resolution (local overrides global) ───────────────────────────
+
+GLOBAL_DEFAULTS = {
+    "ssh_key": "",
+    "network": "bridge",
+    "persist": "bind",
+}
+
+
+def resolve_project(config, project):
+    """Merge global defaults with project-local overrides.
+
+    For each key, use the project value if set, else the global value,
+    else the hardcoded default.
+    """
+    g = config.get("global", {})
+    resolved = dict(project)
+    for key, default in GLOBAL_DEFAULTS.items():
+        project_val = project.get(key, "")
+        global_val = g.get(key, "")
+        resolved[key] = project_val or global_val or default
+    return resolved
+
+
 # ── Docker helpers ─────────────────────────────────────────────────────────
 
 def is_container_running(name):
@@ -207,9 +231,11 @@ def cmd_add(args):
             print(f"Error: Directory does not exist: {project_dir}")
             sys.exit(1)
 
-    # SSH key
+    # SSH key — only store if explicitly provided (else inherits global)
     ssh_key = args.ssh_key or ""
     if not ssh_key and not args.no_prompt:
+        global_ssh = config.get("global", {}).get("ssh_key", "")
+        hint = f" (global default: {Path(global_ssh).name})" if global_ssh else ""
         ssh_dir = Path.home() / ".ssh"
         if ssh_dir.is_dir():
             keys = [f for f in ssh_dir.iterdir()
@@ -220,35 +246,43 @@ def cmd_add(args):
                 for k in sorted(keys):
                     print(f"  {k}")
                 print()
-        ssh_key = input("SSH private key path (leave empty to skip): ").strip()
+        ssh_key = input(f"SSH private key path{hint} (leave empty for global default): ").strip()
 
     if ssh_key:
         ssh_key = str(Path(ssh_key).expanduser().resolve())
         if not Path(ssh_key).is_file():
             print(f"Warning: SSH key not found: {ssh_key}")
 
-    # Network and persist modes
-    network = args.network or "bridge"
-    persist = args.persist or "bind"
+    # Network and persist — only store if explicitly provided via flags
+    project_entry = {"dir": project_dir}
+    if ssh_key:
+        project_entry["ssh_key"] = ssh_key
+    if args.network:
+        project_entry["network"] = args.network
+    if args.persist:
+        project_entry["persist"] = args.persist
 
-    projects[name] = {
-        "dir": project_dir,
-        "ssh_key": ssh_key,
-        "network": network,
-        "persist": persist,
-    }
+    projects[name] = project_entry
     save_config(config)
 
+    # Resolve effective values for display and setup
+    resolved = resolve_project(config, project_entry)
+
     # Create Claude data dir for bind persist
-    if persist == "bind":
+    if resolved["persist"] == "bind":
         data_dir = CLAUDE_DATA_DIR / name
         data_dir.mkdir(parents=True, exist_ok=True)
 
+    g = config.get("global", {})
+    def _show(key, val, label):
+        source = "local" if key in project_entry else ("global" if g.get(key) else "default")
+        return f"  {label:<12} {val or '(none)'} ({source})"
+
     print(f"\nProject '{name}' added.")
-    print(f"  Directory: {project_dir or '(none)'}")
-    print(f"  SSH key:   {ssh_key or '(none)'}")
-    print(f"  Network:   {network}")
-    print(f"  Persist:   {persist}")
+    print(f"  {'Directory:':<12} {project_dir or '(none)'}")
+    print(_show("ssh_key", resolved["ssh_key"], "SSH key:"))
+    print(_show("network", resolved["network"], "Network:"))
+    print(_show("persist", resolved["persist"], "Persist:"))
     print(f"\nRun with: cdev run {name}")
 
 
@@ -266,20 +300,20 @@ def cmd_remove(args):
         print(f"Error: Container '{container_name}' is running. Stop it first.")
         sys.exit(1)
 
-    project = projects[name]
+    resolved = resolve_project(config, projects[name])
     del projects[name]
     save_config(config)
     print(f"Project '{name}' removed from config.")
 
     # Offer to clean data
-    if project.get("persist") == "bind":
+    if resolved["persist"] == "bind":
         data_dir = CLAUDE_DATA_DIR / name
         if data_dir.exists():
             answer = input(f"Also remove Claude data at {data_dir}? [y/N]: ").strip().lower()
             if answer == "y":
                 shutil.rmtree(data_dir)
                 print("  Claude data removed.")
-    elif project.get("persist") == "volume":
+    elif resolved["persist"] == "volume":
         vol_name = f"cdev-{name}-claude"
         answer = input(f"Also remove Docker volume '{vol_name}'? [y/N]: ").strip().lower()
         if answer == "y":
@@ -296,7 +330,7 @@ def cmd_run(args):
         print(f"Error: Project '{name}' not found. Add it with: cdev add {name}")
         sys.exit(1)
 
-    project = projects[name]
+    project = resolve_project(config, projects[name])
     image_name = config.get("global", {}).get("image_name", DEFAULT_IMAGE)
     container_name = f"cdev-{name}"
     git_name = config.get("global", {}).get("git_name", "")
@@ -392,16 +426,17 @@ def cmd_list(args):
     print("-" * 76)
 
     for name, project in sorted(projects.items()):
+        resolved = resolve_project(config, project)
         container_name = f"cdev-{name}"
         status = "running" if container_name in running else "stopped"
-        proj_dir = project.get("dir", "(none)")
+        proj_dir = resolved.get("dir", "(none)")
         # Shorten home paths
         try:
             proj_dir = str(Path(proj_dir).relative_to(Path.home()))
             proj_dir = f"~/{proj_dir}"
         except (ValueError, TypeError):
             pass
-        network = project.get("network", "bridge")
+        network = resolved["network"]
         print(f"{name:<16} {proj_dir:<40} {network:<10} {status:<10}")
 
     print()
@@ -418,7 +453,7 @@ def cmd_clean(args):
         if name not in projects:
             print(f"Error: Project '{name}' not found.")
             sys.exit(1)
-        _clean_project(name, projects[name])
+        _clean_project(name, resolve_project(config, projects[name]))
     else:
         if not projects:
             print("No projects configured.")
@@ -427,7 +462,7 @@ def cmd_clean(args):
         if answer != "y":
             return
         for pname, project in projects.items():
-            _clean_project(pname, project)
+            _clean_project(pname, resolve_project(config, project))
 
 
 def _clean_project(name, project):
@@ -471,6 +506,18 @@ def cmd_config(args):
             print(f"Warning: No Dockerfile found in {p}")
         g["tool_dir"] = str(p)
         changed = True
+    if args.ssh_key:
+        p = Path(args.ssh_key).expanduser().resolve()
+        if not p.is_file():
+            print(f"Warning: SSH key not found: {p}")
+        g["ssh_key"] = str(p)
+        changed = True
+    if args.network:
+        g["network"] = args.network
+        changed = True
+    if args.persist:
+        g["persist"] = args.persist
+        changed = True
 
     if changed:
         save_config(config)
@@ -482,6 +529,9 @@ def cmd_config(args):
     print(f"  git_email:  {g.get('git_email', '(not set)')}")
     print(f"  tool_dir:   {g.get('tool_dir', '(auto-detect)')}")
     print(f"  image_name: {g.get('image_name', DEFAULT_IMAGE)}")
+    print(f"  ssh_key:    {g.get('ssh_key', '(not set)')}")
+    print(f"  network:    {g.get('network', 'bridge (default)')}")
+    print(f"  persist:    {g.get('persist', 'bind (default)')}")
 
 
 # ── CLI setup ──────────────────────────────────────────────────────────────
@@ -501,10 +551,10 @@ def main():
     p_add.add_argument("name", help="Project name (alphanumeric, hyphens, underscores)")
     p_add.add_argument("--dir", help="Project directory path")
     p_add.add_argument("--ssh-key", help="SSH private key path")
-    p_add.add_argument("--network", choices=["bridge", "host"], default="bridge",
-                       help="Docker network mode (default: bridge)")
-    p_add.add_argument("--persist", choices=["bind", "volume"], default="bind",
-                       help="Claude data persistence mode (default: bind)")
+    p_add.add_argument("--network", choices=["bridge", "host"],
+                       help="Docker network mode (inherits global default if not set)")
+    p_add.add_argument("--persist", choices=["bind", "volume"],
+                       help="Claude data persistence mode (inherits global default if not set)")
     p_add.add_argument("--no-prompt", action="store_true",
                        help="Skip interactive prompts for missing values")
 
@@ -528,6 +578,11 @@ def main():
     p_cfg.add_argument("--git-name", help="Set git user name")
     p_cfg.add_argument("--git-email", help="Set git user email")
     p_cfg.add_argument("--tool-dir", help="Set path to directory containing Dockerfile")
+    p_cfg.add_argument("--ssh-key", help="Set default SSH private key path")
+    p_cfg.add_argument("--network", choices=["bridge", "host"],
+                       help="Set default network mode")
+    p_cfg.add_argument("--persist", choices=["bind", "volume"],
+                       help="Set default persistence mode")
 
     args = parser.parse_args()
 

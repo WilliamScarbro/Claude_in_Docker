@@ -115,7 +115,11 @@ echo ""
 # ── Configure cdev ────────────────────────────────────────────────────
 echo "Saving configuration..."
 
-python3 "$CDEV" config --git-name "$GIT_NAME" --git-email "$GIT_EMAIL" --tool-dir "$SCRIPT_DIR"
+CONFIG_ARGS="--git-name \"$GIT_NAME\" --git-email \"$GIT_EMAIL\" --tool-dir \"$SCRIPT_DIR\""
+if [ -n "$SSH_KEY" ]; then
+    CONFIG_ARGS="$CONFIG_ARGS --ssh-key \"$SSH_KEY\""
+fi
+eval python3 "$CDEV" config $CONFIG_ARGS
 echo ""
 
 # ── Build the Docker image ────────────────────────────────────────────
