@@ -1,0 +1,3 @@
+# Runtime secrets and build artifacts - NEVER commit
+.runtime/
+.build-context/
