@@ -5,34 +5,45 @@ Dockerized Claude Code environment with multi-project support, persistent authen
 ## Quick Start
 
 ```bash
-# 1. Set up git identity
-cdev config --git-name "Your Name" --git-email "you@example.com"
+git clone https://github.com/WilliamScarbro/Claude_in_Docker.git
+cd Claude_in_Docker
+./install.sh
+```
 
-# 2. Build the base image
-cdev build
+The installer will:
+1. Check prerequisites (Docker, Python 3, git)
+2. Collect your git name and email
+3. Optionally configure an SSH key for git operations
+4. Install the `cdev` CLI to your PATH
+5. Build the base Docker image
 
-# 3. Add a project
+Then add a project and start working:
+
+```bash
 cdev add myapp --dir ~/projects/myapp
-
-# 4. Run it
 cdev run myapp
 
-# 5. On first run, log in inside the container
+# On first run inside the container:
 claude login
-# Copy the URL into your host browser to complete OAuth
 ```
 
 Subsequent `cdev run` invocations reuse saved credentials — no re-login needed.
 
-## Installation
+### Prerequisites
 
-Symlink `cdev` into your PATH:
+- Docker (daemon must be running)
+- Python 3
+- git
+
+### Manual Installation
+
+If you prefer not to use the install script:
 
 ```bash
 ln -s /path/to/this/repo/cdev ~/.local/bin/cdev
+cdev config --git-name "Your Name" --git-email "you@example.com"
+cdev build
 ```
-
-No dependencies beyond Python 3 (stdlib only).
 
 ## Commands
 
