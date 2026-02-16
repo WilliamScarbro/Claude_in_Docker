@@ -5,7 +5,7 @@ Dockerized Claude Code environment with persistent authentication and host-mount
 ## Quick Start
 
 ```bash
-# 1. Build the image (interactive prompts for SSH key, git identity, project dir)
+# 1. Build the image (interactive prompts for config)
 ./build.sh
 
 # 2. Run the container
@@ -25,8 +25,8 @@ Subsequent `./run.sh` invocations will reuse the saved credentials — no re-log
 
 | Script | Purpose |
 |----------|---------|
-| `build.sh` | Build the Docker image and configure runtime settings (SSH key, git identity, project directory, persistence mode) |
-| `run.sh` | Start the container with configured mounts |
+| `build.sh` | Build the Docker image and configure runtime settings |
+| `run.sh [project-dir]` | Start the container with configured mounts |
 | `clean.sh` | Remove saved Claude credentials for a fresh start |
 
 ## Configuration
@@ -39,6 +39,9 @@ Subsequent `./run.sh` invocations will reuse the saved credentials — no re-log
 - **Persistence mode** — How Claude auth/config is stored between runs:
   - **Mode 1 (default):** Host bind mount at `~/.claude-docker` — files are visible and inspectable on the host
   - **Mode 2:** Docker named volume (`ai-dev-claude`) — managed by Docker, less visible
+- **Network mode** — Container networking:
+  - **Mode 1 (default):** Bridge — standard Docker networking
+  - **Mode 2:** Host — shares host network stack (may help with OAuth callbacks on some setups)
 
 ## Project Mount
 
@@ -65,9 +68,16 @@ To wipe credentials and force a fresh login:
 ./clean.sh
 ```
 
+## Container Commands
+
+| Command | Description |
+|---------|-------------|
+| `claude` | Start Claude Code |
+| `claude-dsp` | Start Claude Code with `--dangerously-skip-permissions` |
+
 ## Architecture
 
-- **Base image:** `node:20-slim`
+- **Base image:** `debian:bookworm-slim`
+- **Claude install:** Native installer (`~/.local/bin/claude`)
 - **User:** `dev` (UID/GID matched to host to avoid permission issues)
-- **Network:** `--network=host` so OAuth login callbacks reach `localhost`
 - **No secrets in the image** — credentials are only in the runtime mount, never baked in

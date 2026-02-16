@@ -51,6 +51,14 @@ echo "  2) Docker named volume (ai-dev-claude)"
 read -rp "Persistence mode [1]: " PERSIST_MODE
 PERSIST_MODE="${PERSIST_MODE:-1}"
 
+# ── Prompt for network mode ─────────────────────────────────────────
+echo ""
+echo "Container network mode:"
+echo "  1) bridge (default Docker networking)"
+echo "  2) host (shares host network stack)"
+read -rp "Network mode [1]: " NETWORK_MODE
+NETWORK_MODE="${NETWORK_MODE:-1}"
+
 # ── Save runtime config (gitignored, never enters image) ────────────
 echo ""
 echo "Saving runtime config..."
@@ -67,6 +75,7 @@ cat > "$RUNTIME_DIR/paths.conf" <<EOF
 SSH_KEY=$SSH_KEY
 PROJECT_DIR=$PROJECT_DIR
 PERSIST_MODE=$PERSIST_MODE
+NETWORK_MODE=$NETWORK_MODE
 EOF
 
 # ── Build context (no secrets) ───────────────────────────────────────

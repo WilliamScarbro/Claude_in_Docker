@@ -58,8 +58,17 @@ if [ -n "$1" ]; then
     MOUNT_ARGS="$MOUNT_ARGS -v $OVERRIDE_DIR:/home/dev/project"
 fi
 
+# ── Network mode ──────────────────────────────────────────────────────
+NETWORK_ARGS=""
+if [ "${NETWORK_MODE:-1}" = "2" ]; then
+    NETWORK_ARGS="--network=host"
+    NETWORK_LABEL="host"
+else
+    NETWORK_LABEL="bridge (default)"
+fi
+
 echo "Starting AI Dev Container..."
-echo "  Network:  host (login callbacks use host localhost)"
+echo "  Network:  $NETWORK_LABEL"
 echo "  SSH key:  ${SSH_KEY:-none}"
 echo "  Project:  ${PROJECT_DIR:-none}"
 if [ "${PERSIST_MODE:-1}" = "1" ]; then
@@ -74,7 +83,7 @@ echo ""
 
 docker run -it --rm \
     --name "$CONTAINER_NAME" \
-    --network=host \
+    $NETWORK_ARGS \
     --env-file "$RUNTIME_DIR/.env" \
     $MOUNT_ARGS \
     "$IMAGE_NAME"
