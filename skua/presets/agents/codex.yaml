@@ -1,0 +1,22 @@
+apiVersion: skua/v1
+kind: AgentConfig
+metadata:
+  name: codex
+spec:
+  install:
+    commands:
+      - "npm install -g --prefix /home/dev/.local @openai/codex"
+    required_packages:
+      - nodejs
+      - npm
+  runtime:
+    command: codex
+    env:
+      PATH: "/home/dev/.local/bin:${PATH}"
+      EDITOR: vim
+    entrypoint_hooks: []
+  auth:
+    dir: .codex
+    files:
+      - auth.json
+    login_command: "codex login"

@@ -189,6 +189,7 @@ class SecurityProfile:
 class AgentInstallSpec:
     commands: list = field(default_factory=list)
     required_packages: list = field(default_factory=list)
+    base_image: str = ""
 
 
 @dataclass

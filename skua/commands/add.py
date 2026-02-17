@@ -42,6 +42,11 @@ def cmd_add(args):
     defaults = g.get("defaults", {})
     quick = getattr(args, "quick", False)
 
+    # Keep shipped presets up to date without overwriting user customizations.
+    preset_dir = Path(__file__).resolve().parent.parent / "presets"
+    if preset_dir.exists():
+        store.install_presets(preset_dir, overwrite=False)
+
     # Project directory
     project_dir = args.dir
     if not project_dir and not repo_url and not quick:
@@ -73,7 +78,31 @@ def cmd_add(args):
     # Environment, security, agent references
     env_name = args.env or defaults.get("environment", "local-docker")
     sec_name = args.security or defaults.get("security", "open")
-    agent_name = args.agent or defaults.get("agent", "claude")
+    available_agents = store.list_resources("AgentConfig")
+    default_agent = defaults.get("agent", "claude")
+    agent_name = args.agent
+
+    if not agent_name and not quick and not args.no_prompt:
+        if available_agents:
+            print("\nAvailable agents:")
+            for a in available_agents:
+                print(f"  {a}")
+            print()
+        agent_input = input(f"Agent [{default_agent}]: ").strip()
+        agent_name = agent_input or default_agent
+
+    if not agent_name:
+        agent_name = default_agent
+
+    if store.load_agent(agent_name) is None:
+        print(f"Error: Agent '{agent_name}' not found.")
+        if available_agents:
+            print("Available agents:")
+            for a in available_agents:
+                print(f"  {a}")
+        else:
+            print("No agent presets installed. Run 'skua init' first.")
+        sys.exit(1)
 
     project = Project(
         name=name,
@@ -92,7 +121,7 @@ def cmd_add(args):
     # Create persistence dir
     env = store.load_environment(env_name)
     if env and env.persistence.mode == "bind":
-        store.claude_data_dir(name).mkdir(parents=True, exist_ok=True)
+        store.project_data_dir(name, agent_name).mkdir(parents=True, exist_ok=True)
 
     # Print summary
     print(f"\nProject '{name}' added.")

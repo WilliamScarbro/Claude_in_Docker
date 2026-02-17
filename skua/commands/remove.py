@@ -32,13 +32,13 @@ def cmd_remove(args):
     # Offer to clean data
     persist_mode = env.persistence.mode if env else "bind"
     if persist_mode == "bind":
-        data_dir = store.claude_data_dir(name)
+        data_dir = store.project_data_dir(name, project.agent)
         if data_dir.exists():
-            if confirm(f"Also remove Claude data at {data_dir}?"):
+            if confirm(f"Also remove {project.agent} data at {data_dir}?"):
                 shutil.rmtree(data_dir)
-                print("  Claude data removed.")
+                print("  Agent data removed.")
     else:
-        vol_name = f"skua-{name}-claude"
+        vol_name = f"skua-{name}-{project.agent}"
         if confirm(f"Also remove Docker volume '{vol_name}'?"):
             subprocess.run(["docker", "volume", "rm", vol_name], capture_output=True)
             print("  Docker volume removed.")

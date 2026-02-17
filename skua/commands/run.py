@@ -1,5 +1,6 @@
 """skua run — start or attach to a container for a project."""
 
+import os
 import shutil
 import subprocess
 import sys
@@ -10,8 +11,47 @@ from skua.docker import (
     is_container_running,
     exec_into_container,
     build_run_command,
+    build_image,
+    image_exists,
+    image_name_for_agent,
+    base_image_for_agent,
     run_container,
 )
+
+
+def _seed_auth_from_host(data_dir: Path, auth_dir: str, auth_files: list) -> int:
+    """Seed missing persisted auth files from host HOME.
+
+    For each auth file, checks:
+      1) ~/auth_dir/<file>
+      2) ~/<file>
+    and copies the first match into data_dir.
+    """
+    copied = 0
+    home = Path.home()
+    rel_auth_dir = (auth_dir or ".claude").lstrip("/")
+    codex_home = os.environ.get("CODEX_HOME", "").strip()
+
+    for fname in auth_files or []:
+        name = Path(fname).name
+        if not name:
+            continue
+
+        dest = data_dir / name
+        if dest.exists():
+            continue
+
+        candidates = [home / rel_auth_dir / name]
+        if rel_auth_dir == ".codex" and codex_home:
+            candidates.append(Path(codex_home).expanduser() / name)
+        candidates.append(home / name)
+        for src in candidates:
+            if src.is_file():
+                shutil.copy2(src, dest)
+                copied += 1
+                break
+
+    return copied
 
 
 def cmd_run(args):
@@ -81,20 +121,60 @@ def cmd_run(args):
 
     # Determine image name
     g = store.load_global()
-    image_name = g.get("imageName", "skua-base")
+    image_name_base = g.get("imageName", "skua-base")
+    image_name = image_name_for_agent(image_name_base, project.agent)
+    if not image_exists(image_name):
+        print(f"Image '{image_name}' not found for agent '{project.agent}'.")
+        print("Building image lazily...")
+        container_dir = store.get_container_dir()
+        if container_dir is None:
+            print("Error: Cannot find container build assets (entrypoint.sh).")
+            print("Set toolDir in global.yaml or reinstall skua.")
+            sys.exit(1)
+
+        base_image = g.get("baseImage", "debian:bookworm-slim")
+        defaults = g.get("defaults", {})
+        build_security_name = defaults.get("security", "open")
+        build_security = store.load_security(build_security_name) or sec
+        image_config = g.get("image", {})
+        extra_packages = image_config.get("extraPackages", [])
+        extra_commands = image_config.get("extraCommands", [])
+        agent_base_image = base_image_for_agent(base_image, agent)
+
+        success = build_image(
+            container_dir=container_dir,
+            image_name=image_name,
+            security=build_security,
+            agent=agent,
+            base_image=agent_base_image,
+            extra_packages=extra_packages,
+            extra_commands=extra_commands,
+        )
+        if not success:
+            print(f"Error: failed to build image '{image_name}'.")
+            sys.exit(1)
 
     # Build persistence path
-    data_dir = store.claude_data_dir(name)
+    data_dir = store.project_data_dir(name, project.agent)
+    auth_dir = (agent.auth.dir or ".claude").lstrip("/")
+    auth_files = list(agent.auth.files)
+    # Backward-compat for older installed presets that had no auth.files.
+    if not auth_files:
+        if project.agent == "codex":
+            auth_files = ["auth.json"]
+        elif project.agent == "claude":
+            auth_files = [".credentials.json", ".claude.json"]
 
-    # Seed .claude.json from host if needed
+    # Seed persisted auth files from host if needed
     if env.persistence.mode == "bind":
         data_dir.mkdir(parents=True, exist_ok=True)
-        claude_json_dest = data_dir / ".claude.json"
-        creds_file = data_dir / ".credentials.json"
-        host_claude_json = Path.home() / ".claude.json"
-        if not claude_json_dest.exists() and creds_file.exists() and host_claude_json.exists():
-            shutil.copy2(host_claude_json, claude_json_dest)
-            print("Seeded .claude.json from host.")
+        copied = _seed_auth_from_host(
+            data_dir=data_dir,
+            auth_dir=auth_dir,
+            auth_files=auth_files,
+        )
+        if copied:
+            print(f"Seeded {copied} auth file(s) from host.")
 
     # Build and exec docker command
     docker_cmd = build_run_command(
@@ -112,13 +192,14 @@ def cmd_run(args):
     print(f"  Environment: {project.environment}")
     print(f"  Security:    {project.security}")
     print(f"  Agent:       {project.agent}")
+    print(f"  Image:       {image_name}")
     ssh_display = Path(project.ssh.private_key).name if project.ssh.private_key else "(none)"
     print(f"  SSH key:     {ssh_display}")
     print(f"  Network:     {env.network.mode}")
     if env.persistence.mode == "bind":
-        print(f"  Claude:      {data_dir}")
+        print(f"  Auth dir:    {data_dir} -> /home/dev/{auth_dir}")
     else:
-        print(f"  Claude:      volume skua-{name}-claude")
+        print(f"  Auth dir:    volume skua-{name}-{project.agent} -> /home/dev/{auth_dir}")
     print()
 
     run_container(docker_cmd)

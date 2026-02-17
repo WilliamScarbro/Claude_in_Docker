@@ -1,9 +1,20 @@
 #!/bin/bash
 set -e
 
+AGENT_NAME="${SKUA_AGENT_NAME:-agent}"
+AGENT_COMMAND="${SKUA_AGENT_COMMAND:-$AGENT_NAME}"
+AGENT_LOGIN_COMMAND="${SKUA_AGENT_LOGIN_COMMAND:-$AGENT_COMMAND login}"
+AUTH_DIR_REL="${SKUA_AUTH_DIR:-.claude}"
+AUTH_DIR="/home/dev/${AUTH_DIR_REL#/}"
+AUTH_FILES_RAW="${SKUA_AUTH_FILES:-}"
+PROJECT_DIR="${SKUA_PROJECT_DIR:-/home/dev/project}"
+
 echo "============================================"
-echo "  skua — Dockerized Claude Code"
+echo "  skua — Dockerized Coding Agent"
 echo "============================================"
+echo ""
+echo "Agent: ${AGENT_NAME}"
+echo "Auth:  ${AUTH_DIR_REL}"
 echo ""
 
 # ── Configure git identity from env vars ─────────────────────────────
@@ -36,55 +47,68 @@ fi
 
 # ── Fix volume ownership (Docker creates named volumes as root) ───────
 DEV_GROUP="$(id -gn dev)"
-sudo chown -R dev:"$DEV_GROUP" /home/dev/.claude
+mkdir -p "$AUTH_DIR"
+sudo chown -R dev:"$DEV_GROUP" "$AUTH_DIR"
 
-# ── Seed config defaults into persistent volumes ─────────────────────
-# Volume is mounted at ~/.claude. On first run it's
-# empty, so we copy baked-in defaults. On subsequent runs the volume
-# already has config + credentials, so we only add missing files.
-for src in /home/dev/.claude-defaults/*; do
-    [ -f "$src" ] || continue
-    dest="/home/dev/.claude/$(basename "$src")"
-    [ -f "$dest" ] || cp "$src" "$dest"
-done
+# ── Seed Claude config defaults into persistent volume ──────────────
+if [ "$AUTH_DIR_REL" = ".claude" ] && [ -d /home/dev/.claude-defaults ]; then
+    for src in /home/dev/.claude-defaults/*; do
+        [ -f "$src" ] || continue
+        dest="${AUTH_DIR}/$(basename "$src")"
+        [ -f "$dest" ] || cp "$src" "$dest"
+    done
+fi
 
 # ── Symlink ~/.claude.json into the persistent volume ────────────────
 # Claude Code reads/writes ~/.claude.json (account metadata, onboarding
 # state, etc.) which lives OUTSIDE ~/.claude/. We store the real file
 # inside the persistent volume and symlink it so writes persist.
-rm -f /home/dev/.claude.json
-if [ ! -f /home/dev/.claude/.claude.json ]; then
-    # First run: create an empty JSON object so Claude can populate it
-    echo '{}' > /home/dev/.claude/.claude.json
+if [ "$AUTH_DIR_REL" = ".claude" ]; then
+    rm -f /home/dev/.claude.json
+    if [ ! -f "${AUTH_DIR}/.claude.json" ]; then
+        # First run: create an empty JSON object so Claude can populate it
+        echo '{}' > "${AUTH_DIR}/.claude.json"
+    fi
+    ln -sf "${AUTH_DIR}/.claude.json" /home/dev/.claude.json
 fi
-ln -sf /home/dev/.claude/.claude.json /home/dev/.claude.json
 
 # ── Shell aliases ────────────────────────────────────────────────────
-echo "alias claude-dsp='claude --dangerously-skip-permissions'" >> /home/dev/.bashrc
+if [ "$AGENT_COMMAND" = "claude" ]; then
+    echo "alias claude-dsp='claude --dangerously-skip-permissions'" >> /home/dev/.bashrc
+fi
 
 # ── Check tool availability ──────────────────────────────────────────
-if command -v claude &>/dev/null; then
-    echo "[OK] Claude Code available"
+if command -v "$AGENT_COMMAND" &>/dev/null; then
+    echo "[OK] ${AGENT_NAME} available"
 else
-    echo "[!!] Claude Code not found"
+    echo "[!!] ${AGENT_NAME} command not found: ${AGENT_COMMAND}"
 fi
 
 # ── Check auth status ────────────────────────────────────────────────
 NEEDS_LOGIN=()
+PRIMARY_AUTH_FILE=""
+IFS=',' read -r -a AUTH_FILES <<< "$AUTH_FILES_RAW"
+if [ ${#AUTH_FILES[@]} -gt 0 ] && [ -n "${AUTH_FILES[0]}" ]; then
+    PRIMARY_AUTH_FILE="$AUTH_DIR/${AUTH_FILES[0]}"
+fi
 
-if [ -f /home/dev/.claude/.credentials.json ]; then
-    echo "[OK] Claude authenticated (persistent)"
+if [ -n "$PRIMARY_AUTH_FILE" ] && [ -f "$PRIMARY_AUTH_FILE" ]; then
+    echo "[OK] ${AGENT_NAME} authenticated (persistent)"
 else
-    echo "[--] Claude not logged in"
-    NEEDS_LOGIN+=("claude")
+    if [ -n "$PRIMARY_AUTH_FILE" ]; then
+        echo "[--] ${AGENT_NAME} not logged in (${PRIMARY_AUTH_FILE} missing)"
+    else
+        echo "[--] ${AGENT_NAME} auth file not configured"
+    fi
+    NEEDS_LOGIN+=("$AGENT_LOGIN_COMMAND")
 fi
 
 echo ""
 
 # ── Project ──────────────────────────────────────────────────────────
-if [ -d /home/dev/project ] && [ "$(ls -A /home/dev/project 2>/dev/null)" ]; then
-    echo "Project: /home/dev/project"
-    cd /home/dev/project
+if [ -d "$PROJECT_DIR" ] && [ "$(ls -A "$PROJECT_DIR" 2>/dev/null)" ]; then
+    echo "Project: ${PROJECT_DIR}"
+    cd "$PROJECT_DIR"
 else
     echo "No project mounted."
 fi
@@ -94,8 +118,8 @@ echo ""
 # ── Login prompts if needed ──────────────────────────────────────────
 if [ ${#NEEDS_LOGIN[@]} -gt 0 ]; then
     echo "── First-time setup ──────────────────────"
-    for tool in "${NEEDS_LOGIN[@]}"; do
-        echo "  Run '$tool login' to authenticate"
+    for login_cmd in "${NEEDS_LOGIN[@]}"; do
+        echo "  Run '$login_cmd' to authenticate"
         echo "  (copy the URL into your host browser)"
     done
     echo ""
@@ -106,8 +130,10 @@ if [ ${#NEEDS_LOGIN[@]} -gt 0 ]; then
 fi
 
 echo "Usage:"
-echo "  claude         -> Start Claude Code"
-echo "  claude-dsp     -> Start with --dangerously-skip-permissions"
+echo "  ${AGENT_COMMAND}         -> Start ${AGENT_NAME}"
+if [ "$AGENT_COMMAND" = "claude" ]; then
+    echo "  claude-dsp     -> Start with --dangerously-skip-permissions"
+fi
 echo ""
 echo "============================================"
 echo ""
