@@ -1,0 +1,15 @@
+apiVersion: skua/v1
+kind: SecurityProfile
+metadata:
+  name: airgapped
+spec:
+  network:
+    outbound: none
+  agent:
+    sudo: false
+  install:
+    mode: none
+  audit:
+    mode: none
+  image_updates:
+    mode: disabled

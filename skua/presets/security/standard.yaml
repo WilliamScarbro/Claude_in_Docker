@@ -1,0 +1,16 @@
+apiVersion: skua/v1
+kind: SecurityProfile
+metadata:
+  name: standard
+spec:
+  network:
+    outbound: unrestricted
+  agent:
+    sudo: true
+  install:
+    mode: advisory
+  audit:
+    mode: advisory
+  image_updates:
+    mode: suggest
+    source: audit

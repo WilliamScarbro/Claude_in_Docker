@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+"""Skua CLI entry point."""
+import os
+import sys
+
+# Resolve symlinks so this works when installed via symlink
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+
+from skua.cli import main
+
+main()

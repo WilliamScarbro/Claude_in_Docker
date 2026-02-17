@@ -1,0 +1,15 @@
+apiVersion: skua/v1
+kind: Environment
+metadata:
+  name: local-docker
+spec:
+  mode: unmanaged
+  driver: docker
+  docker:
+    runtime: local
+    cleanup: ephemeral
+  persistence:
+    mode: bind
+    base_path: ~/.config/skua/claude-data
+  network:
+    mode: bridge

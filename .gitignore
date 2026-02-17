@@ -3,3 +3,14 @@
 __pycache__/
 *.deb
 deb-build/
+packaging/deb-build/
+
+# Editor / IDE
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Claude Code
+.claude/
+plans/

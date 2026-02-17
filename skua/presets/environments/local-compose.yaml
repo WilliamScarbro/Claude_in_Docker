@@ -1,0 +1,15 @@
+apiVersion: skua/v1
+kind: Environment
+metadata:
+  name: local-compose
+spec:
+  mode: managed
+  driver: compose
+  compose:
+    runtime: local
+    cleanup: ephemeral
+  persistence:
+    mode: volume
+    volume_prefix: skua
+  network:
+    mode: internal

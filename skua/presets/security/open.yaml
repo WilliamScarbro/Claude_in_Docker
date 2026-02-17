@@ -1,0 +1,15 @@
+apiVersion: skua/v1
+kind: SecurityProfile
+metadata:
+  name: open
+spec:
+  network:
+    outbound: unrestricted
+  agent:
+    sudo: true
+  install:
+    mode: unrestricted
+  audit:
+    mode: none
+  image_updates:
+    mode: disabled

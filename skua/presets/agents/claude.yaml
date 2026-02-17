@@ -1,0 +1,22 @@
+apiVersion: skua/v1
+kind: AgentConfig
+metadata:
+  name: claude
+spec:
+  install:
+    commands:
+      - "curl -fsSL https://claude.ai/install.sh | bash"
+    required_packages: []
+  runtime:
+    command: claude
+    env:
+      PATH: "/home/dev/.local/bin:${PATH}"
+      EDITOR: vim
+    entrypoint_hooks:
+      - entrypoint.d/claude.sh
+  auth:
+    dir: .claude
+    files:
+      - .credentials.json
+      - .claude.json
+    login_command: "claude login"

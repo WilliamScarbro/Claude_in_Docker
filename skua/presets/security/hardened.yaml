@@ -1,0 +1,25 @@
+apiVersion: skua/v1
+kind: SecurityProfile
+metadata:
+  name: hardened
+spec:
+  network:
+    outbound: proxy
+    proxy:
+      allowed_domains:
+        - github.com
+        - "*.githubusercontent.com"
+        - pypi.org
+        - "*.pythonhosted.org"
+      log_requests: true
+  agent:
+    sudo: false
+  install:
+    mode: verified
+    verified:
+      auto_approve: []
+  audit:
+    mode: trusted
+  image_updates:
+    mode: suggest
+    source: proxy
