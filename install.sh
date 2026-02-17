@@ -2,7 +2,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SKUA="$SCRIPT_DIR/skua"
+SKUA="$SCRIPT_DIR/bin/skua"
 
 echo "============================================"
 echo "  skua installer"
@@ -22,6 +22,12 @@ if [ -n "$missing" ]; then
     exit 1
 fi
 
+# Check for PyYAML
+if ! python3 -c "import yaml" 2>/dev/null; then
+    echo "Installing PyYAML..."
+    pip3 install --break-system-packages pyyaml 2>/dev/null || pip3 install pyyaml
+fi
+
 # Verify Docker daemon is running
 if ! docker info &>/dev/null; then
     echo "Error: Docker daemon is not running."
@@ -29,45 +35,7 @@ if ! docker info &>/dev/null; then
     exit 1
 fi
 
-echo "[OK] Prerequisites: docker, python3, git"
-echo ""
-
-# ── Git identity ──────────────────────────────────────────────────────
-DEFAULT_GIT_NAME=$(git config --global user.name 2>/dev/null || echo "")
-DEFAULT_GIT_EMAIL=$(git config --global user.email 2>/dev/null || echo "")
-
-read -rp "Git user name [$DEFAULT_GIT_NAME]: " GIT_NAME
-GIT_NAME="${GIT_NAME:-$DEFAULT_GIT_NAME}"
-
-read -rp "Git user email [$DEFAULT_GIT_EMAIL]: " GIT_EMAIL
-GIT_EMAIL="${GIT_EMAIL:-$DEFAULT_GIT_EMAIL}"
-
-if [ -z "$GIT_NAME" ] || [ -z "$GIT_EMAIL" ]; then
-    echo "Error: Git name and email are required."
-    exit 1
-fi
-
-echo ""
-
-# ── SSH key (optional) ────────────────────────────────────────────────
-SSH_KEY=""
-if ls "$HOME/.ssh"/*.pub &>/dev/null; then
-    echo "Available SSH keys:"
-    for pub in "$HOME/.ssh"/*.pub; do
-        echo "  ${pub%.pub}"
-    done
-    echo ""
-fi
-read -rp "SSH private key for git operations (leave empty to skip): " SSH_KEY
-
-if [ -n "$SSH_KEY" ]; then
-    SSH_KEY="$(realpath "$SSH_KEY" 2>/dev/null || echo "$SSH_KEY")"
-    if [ ! -f "$SSH_KEY" ]; then
-        echo "Warning: $SSH_KEY not found, skipping."
-        SSH_KEY=""
-    fi
-fi
-
+echo "[OK] Prerequisites: docker, python3, git, pyyaml"
 echo ""
 
 # ── Install skua to PATH ─────────────────────────────────────────────
@@ -88,13 +56,16 @@ done
 
 if [ -n "$INSTALL_DIR" ]; then
     mkdir -p "$INSTALL_DIR"
-    ln -sf "$SKUA" "$INSTALL_DIR/skua"
+    # Remove existing symlink/file first to avoid stale targets
+    rm -f "$INSTALL_DIR/skua"
+    ln -s "$SKUA" "$INSTALL_DIR/skua"
     echo "[OK] Symlinked skua -> $INSTALL_DIR/skua"
 else
     # None of the standard dirs are in PATH — use ~/.local/bin and warn
     INSTALL_DIR="$HOME/.local/bin"
     mkdir -p "$INSTALL_DIR"
-    ln -sf "$SKUA" "$INSTALL_DIR/skua"
+    rm -f "$INSTALL_DIR/skua"
+    ln -s "$SKUA" "$INSTALL_DIR/skua"
     echo "[!!] Symlinked skua -> $INSTALL_DIR/skua"
     echo ""
     echo "  WARNING: $INSTALL_DIR is not in your PATH."
@@ -112,22 +83,30 @@ else
     echo "  Then restart your shell or run: source $PROFILE"
 fi
 
+# Verify skua is callable
+if command -v skua &>/dev/null && skua --version &>/dev/null; then
+    echo "[OK] Verified: $(skua --version) is available on PATH"
+else
+    echo ""
+    echo "  ERROR: 'skua' is not available on your PATH after install."
+    echo "  The symlink was created at: $INSTALL_DIR/skua"
+    echo "  Make sure $INSTALL_DIR is in your PATH, then restart your shell."
+    exit 1
+fi
+
 echo ""
 
-# ── Configure skua ────────────────────────────────────────────────────
-echo "Saving configuration..."
+# ── Run init wizard ──────────────────────────────────────────────────
+# The init wizard handles git identity, SSH key, preset installation,
+# and global config setup interactively.
+"$SKUA" init
 
-CONFIG_ARGS="--git-name \"$GIT_NAME\" --git-email \"$GIT_EMAIL\" --tool-dir \"$SCRIPT_DIR\""
-if [ -n "$SSH_KEY" ]; then
-    CONFIG_ARGS="$CONFIG_ARGS --ssh-key \"$SSH_KEY\""
-fi
-eval python3 "$SKUA" config $CONFIG_ARGS
 echo ""
 
 # ── Build the Docker image ────────────────────────────────────────────
 echo "Building Docker image (this may take a few minutes)..."
 echo ""
-python3 "$SKUA" build
+"$SKUA" build
 
 echo ""
 
@@ -137,15 +116,13 @@ echo "============================================"
 echo "  Installation complete!"
 echo "============================================"
 echo ""
-echo "Next steps:"
+echo "Quick start:"
 echo ""
-if [ -n "$SSH_KEY" ]; then
-    echo "  skua add <project-name> --dir /path/to/project --ssh-key $SSH_KEY"
-else
-    echo "  skua add <project-name> --dir /path/to/project"
-fi
+echo "  skua add <project-name> --dir /path/to/project"
 echo "  skua run <project-name>"
 echo ""
 echo "On first run inside the container:"
 echo "  claude login    (copy the URL into your host browser)"
+echo ""
+echo "See docs/ for configuration guides and security profiles."
 echo ""
