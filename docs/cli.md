@@ -20,7 +20,7 @@ skua init --force   # re-initialize (overwrites global config)
 
 ### `skua build`
 
-Build the Docker image from configuration. Generates a Dockerfile dynamically based on the default security profile and agent config.
+Build agent Docker images required by currently configured projects. Skua tags each image as `<imageName>-<agent>` (for example `skua-base-codex` and `skua-base-claude`). By default, Codex uses a lightweight Debian-based image and installs only Codex CLI dependencies.
 
 ```bash
 skua build
@@ -44,7 +44,7 @@ skua add myapp --dir ~/projects/myapp \
     --ssh-key ~/.ssh/id_ed25519 \
     --env local-docker-gvisor \
     --security standard \
-    --agent claude
+    --agent codex
 ```
 
 | Option | Description |
@@ -59,7 +59,7 @@ skua add myapp --dir ~/projects/myapp \
 
 ### `skua remove <name>`
 
-Remove a project configuration. Optionally removes persisted Claude data.
+Remove a project configuration. Optionally removes persisted agent data.
 
 ```bash
 skua remove myapp
@@ -68,6 +68,8 @@ skua remove myapp
 ### `skua run <name>`
 
 Start a container for a project. Validates configuration before launching. If the container is already running, offers to attach to it.
+
+For bind persistence, Skua auto-seeds missing agent auth files from host home into the project's persisted auth directory on first run (for example Codex `~/.codex/auth.json`).
 
 ```bash
 skua run myapp
@@ -81,15 +83,24 @@ List all configured projects and their running status.
 skua list
 ```
 
-Output columns: NAME, DIRECTORY, SECURITY, NETWORK, STATUS.
+Output columns: NAME, SOURCE, AGENT, SECURITY, NETWORK, STATUS.
 
 ### `skua clean [<name>]`
 
-Remove saved Claude credentials for a project (or all projects).
+Remove saved agent credentials for a project (or all projects).
 
 ```bash
 skua clean myapp    # one project
 skua clean          # all projects (with confirmation)
+```
+
+### `skua purge`
+
+Remove all local skua state: project config, skua containers, skua volumes, and skua images.
+
+```bash
+skua purge          # interactive confirmation
+skua purge --yes    # no prompts
 ```
 
 ### `skua config`
@@ -107,7 +118,7 @@ skua config --ssh-key ~/.ssh/id_ed25519
 skua config --tool-dir /path/to/skua
 skua config --default-env local-docker-gvisor
 skua config --default-security standard
-skua config --default-agent claude
+skua config --default-agent codex
 ```
 
 ### `skua validate <name>`
@@ -141,7 +152,8 @@ All configuration is stored in `~/.config/skua/`:
 ├── security/                # SecurityProfile resources
 ├── agents/                  # AgentConfig resources
 ├── projects/                # Project resources
-└── claude-data/             # persisted credentials (bind mode)
+├── claude-data/             # persisted default/legacy auth data (bind mode)
+└── agent-data/              # persisted per-agent auth data (bind mode)
 ```
 
 Each resource is a standalone YAML file with `apiVersion`, `kind`, `metadata`, and `spec` fields. Edit them directly or use CLI commands.
