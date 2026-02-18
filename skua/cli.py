@@ -51,6 +51,7 @@ def main():
     p_add.add_argument("name", help="Project name (alphanumeric, hyphens, underscores)")
     p_add.add_argument("--dir", help="Project directory path")
     p_add.add_argument("--repo", help="Git repository URL to clone (mutually exclusive with --dir)")
+    p_add.add_argument("--host", help="SSH config host for remote execution (requires --repo)")
     p_add.add_argument("--ssh-key", help="SSH private key path")
     p_add.add_argument("--env", help="Environment resource name (default: from global)")
     p_add.add_argument("--security", help="Security profile name (default: from global)")

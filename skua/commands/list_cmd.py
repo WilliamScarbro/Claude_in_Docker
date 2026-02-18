@@ -43,6 +43,11 @@ def _github_source(repo_url: str) -> str:
 
 def _format_project_source(project) -> str:
     """Render a clear source label for list output."""
+    host = getattr(project, "host", "") or ""
+    if host:
+        github = _github_source(project.repo) if project.repo else ""
+        repo_label = github or (f"REPO:{project.repo}" if project.repo else "(none)")
+        return f"SSH:{host} {repo_label}"
     if project.directory:
         return f"LOCAL:{_shorten_home_path(project.directory)}"
     if project.repo:

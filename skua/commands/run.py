@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: BUSL-1.1
 """skua run — start or attach to a container for a project."""
 
+import copy
+import os
 import shutil
 import subprocess
 import sys
@@ -18,8 +20,41 @@ from skua.docker import (
     resolve_project_image_inputs,
     start_container,
     wait_for_running_container,
+    _project_mount_path,
 )
 from skua.project_adapt import ensure_adapt_workspace
+
+
+def _clone_repo_into_remote_volume(project, vol_name: str):
+    """Clone the project repo into a Docker named volume using alpine/git.
+
+    Requires DOCKER_HOST to already be set to the remote host.
+    Skips silently if the repo is already cloned in the volume.
+    """
+    check = subprocess.run(
+        [
+            "docker", "run", "--rm",
+            "-v", f"{vol_name}:/workspace",
+            "alpine", "sh", "-c",
+            "test -d /workspace/.git && echo cloned || echo empty",
+        ],
+        capture_output=True, text=True,
+    )
+    if check.returncode == 0 and "cloned" in check.stdout:
+        print(f"Using existing repo clone in volume '{vol_name}'.")
+        return
+
+    print(f"Cloning {project.repo} into remote volume '{vol_name}'...")
+    result = subprocess.run([
+        "docker", "run", "--rm",
+        "-v", f"{vol_name}:/workspace",
+        "alpine/git",
+        "clone", project.repo, "/workspace",
+    ])
+    if result.returncode != 0:
+        print("Error: Failed to clone repository into remote volume.")
+        print("  Tip: For private SSH repositories, ensure git/SSH access is configured on the remote host.")
+        sys.exit(1)
 
 
 def _seed_auth_from_host(data_dir: Path, cred, agent) -> int:
@@ -71,6 +106,13 @@ def cmd_run(args):
         print(f"Error: Project '{name}' not found. Add it with: skua add {name}")
         sys.exit(1)
 
+    host = getattr(project, "host", "") or ""
+
+    # Route Docker operations to remote host when specified
+    if host:
+        os.environ["DOCKER_HOST"] = f"ssh://{host}"
+        print(f"Connecting to remote host '{host}'...")
+
     container_name = f"skua-{name}"
 
     # Check if already running
@@ -97,6 +139,11 @@ def cmd_run(args):
         print(f"Error: Agent '{project.agent}' not found.")
         sys.exit(1)
 
+    # Remote projects must use named volumes (bind mounts don't work across hosts)
+    if host:
+        env = copy.deepcopy(env)
+        env.persistence.mode = "volume"
+
     # Validate configuration
     result = validate_project(project, env, sec, agent)
     if result.warnings:
@@ -109,8 +156,12 @@ def cmd_run(args):
         print("\nRun 'skua validate' for details, or fix the configuration.")
         sys.exit(1)
 
-    # Clone repo if needed
-    if project.repo:
+    # Handle repo — remote projects clone into a Docker volume, local projects clone to disk
+    repo_volume = ""
+    if host and project.repo:
+        repo_volume = f"skua-{name}-repo"
+        _clone_repo_into_remote_volume(project, repo_volume)
+    elif project.repo:
         clone_dir = store.repo_dir(name)
         if not clone_dir.exists():
             print(f"Cloning {project.repo} into {clone_dir}...")
@@ -128,7 +179,7 @@ def cmd_run(args):
             print(f"Using existing clone at {clone_dir}")
         project.directory = str(clone_dir)
 
-    if project.directory and Path(project.directory).is_dir():
+    if not host and project.directory and Path(project.directory).is_dir():
         ensure_adapt_workspace(Path(project.directory), project.name, project.agent)
 
     # Determine image name
@@ -182,8 +233,8 @@ def cmd_run(args):
         if cred is None:
             print(f"Warning: Credential '{project.credential}' not found.")
 
-    # Seed persisted auth files from host if needed
-    if env.persistence.mode == "bind":
+    # Seed persisted auth files from host (local projects only; remote uses named volumes)
+    if not host and env.persistence.mode == "bind":
         data_dir.mkdir(parents=True, exist_ok=True)
         copied = _seed_auth_from_host(data_dir=data_dir, cred=cred, agent=agent)
         if copied:
@@ -197,11 +248,17 @@ def cmd_run(args):
         agent=agent,
         image_name=image_name,
         data_dir=data_dir,
+        repo_volume=repo_volume,
     )
 
     # Print summary
     print(f"Starting skua-{name}...")
-    print(f"  Project:     {project.directory or '(none)'}")
+    if host:
+        print(f"  Host:        {host} (remote)")
+    if repo_volume:
+        print(f"  Repo vol:    {repo_volume} -> {_project_mount_path(project)}")
+    else:
+        print(f"  Project:     {project.directory or '(none)'}")
     print(f"  Environment: {project.environment}")
     print(f"  Security:    {project.security}")
     print(f"  Agent:       {project.agent}")

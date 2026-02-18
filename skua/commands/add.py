@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: BUSL-1.1
 """skua add — add a project configuration."""
 
+import subprocess
 import sys
 from pathlib import Path
 
 from skua.config import ConfigStore, Project
 from skua.config.resources import ProjectGitSpec, ProjectSshSpec, ProjectImageSpec
 from skua.project_adapt import ADAPT_GUIDE_NAME, ensure_adapt_workspace
-from skua.utils import find_ssh_keys
+from skua.utils import find_ssh_keys, parse_ssh_config_hosts
 
 
 def cmd_add(args):
@@ -19,6 +20,7 @@ def cmd_add(args):
 
     name = args.name
     repo_url = getattr(args, "repo", None) or ""
+    host = getattr(args, "host", None) or ""
 
     # Validate name
     if not all(c.isalnum() or c in "-_" for c in name):
@@ -33,6 +35,27 @@ def cmd_add(args):
     if args.dir and repo_url:
         print("Error: --dir and --repo are mutually exclusive. Specify one or the other.")
         sys.exit(1)
+
+    # --host requires --repo and is incompatible with --dir
+    if host and args.dir:
+        print("Error: --host and --dir are mutually exclusive. Use --repo for remote projects.")
+        sys.exit(1)
+    if host and not repo_url:
+        print("Error: --host requires --repo. Remote projects must specify a git repository URL.")
+        sys.exit(1)
+
+    # Validate SSH config host
+    if host:
+        available_hosts = parse_ssh_config_hosts()
+        if host not in available_hosts:
+            print(f"Error: '{host}' is not defined in ~/.ssh/config.")
+            if available_hosts:
+                print("  Defined hosts:")
+                for h in available_hosts:
+                    print(f"    {h}")
+            else:
+                print("  No hosts found in ~/.ssh/config.")
+            sys.exit(1)
 
     # Validate repo URL looks like a git URL
     if repo_url and not _is_git_url(repo_url):
@@ -131,6 +154,7 @@ def cmd_add(args):
         name=name,
         directory=project_dir or "",
         repo=repo_url,
+        host=host,
         environment=env_name,
         security=sec_name,
         agent=agent_name,
@@ -142,18 +166,35 @@ def cmd_add(args):
 
     store.save_resource(project)
 
-    # Create persistence dir
-    env = store.load_environment(env_name)
-    if env and env.persistence.mode == "bind":
-        store.project_data_dir(name, agent_name).mkdir(parents=True, exist_ok=True)
+    # Create persistence dir (local projects only)
+    if not host:
+        env = store.load_environment(env_name)
+        if env and env.persistence.mode == "bind":
+            store.project_data_dir(name, agent_name).mkdir(parents=True, exist_ok=True)
     if project_dir and Path(project_dir).is_dir():
         ensure_adapt_workspace(Path(project_dir), name, agent_name)
 
+    # Create Docker volume for repo on remote host
+    if host:
+        vol_name = f"skua-{name}-repo"
+        print(f"Creating Docker volume '{vol_name}' on {host}...")
+        result = subprocess.run(
+            ["ssh", host, "docker", "volume", "create", vol_name],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            print(f"Warning: Failed to create volume on {host}: {result.stderr.strip()}")
+        else:
+            print(f"  Volume '{vol_name}' ready.")
+
     # Print summary
     print(f"\nProject '{name}' added.")
+    if host:
+        print(f"  {'Host:':<14} {host} (remote)")
     if repo_url:
         print(f"  {'Repo:':<14} {repo_url}")
-    print(f"  {'Directory:':<14} {project_dir or '(none)'}")
+    if not host:
+        print(f"  {'Directory:':<14} {project_dir or '(none)'}")
     print(f"  {'Environment:':<14} {env_name}")
     print(f"  {'Security:':<14} {sec_name}")
     print(f"  {'Agent:':<14} {agent_name}")

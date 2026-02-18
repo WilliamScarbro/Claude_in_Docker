@@ -55,3 +55,22 @@ def find_ssh_keys() -> list:
         f for f in ssh_dir.iterdir()
         if f.is_file() and not f.name.endswith(".pub") and f.name not in skip
     )
+
+
+def parse_ssh_config_hosts() -> list:
+    """Parse ~/.ssh/config and return defined Host names (excludes wildcards)."""
+    config_file = Path.home() / ".ssh" / "config"
+    if not config_file.is_file():
+        return []
+    hosts = []
+    try:
+        for line in config_file.read_text().splitlines():
+            stripped = line.strip()
+            if stripped.lower().startswith("host "):
+                parts = stripped.split()[1:]
+                for host in parts:
+                    if "*" not in host and "?" not in host and "!" not in host:
+                        hosts.append(host)
+    except OSError:
+        return []
+    return sorted(set(hosts))

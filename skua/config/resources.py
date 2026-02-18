@@ -256,6 +256,7 @@ class Project:
     name: str = ""
     directory: str = ""
     repo: str = ""                            # git URL (cloned to managed dir)
+    host: str = ""                            # SSH config host for remote execution
     environment: str = "local-docker"     # references Environment by name
     security: str = "open"                # references SecurityProfile by name
     agent: str = "claude"                 # references AgentConfig by name

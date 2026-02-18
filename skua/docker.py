@@ -483,6 +483,7 @@ def build_run_command(
     agent: AgentConfig,
     image_name: str,
     data_dir: Path,
+    repo_volume: str = "",
 ) -> list:
     """Build the docker run command list from resolved configuration."""
     container_name = f"skua-{project.name}"
@@ -517,8 +518,10 @@ def build_run_command(
         if known_hosts.is_file():
             docker_cmd.extend(["-v", f"{known_hosts}:/home/dev/.ssh-mount/known_hosts:ro"])
 
-    # Project directory mount
-    if project.directory and Path(project.directory).is_dir():
+    # Project directory mount (local bind-mount or remote named volume)
+    if repo_volume:
+        docker_cmd.extend(["-v", f"{repo_volume}:{project_mount_path}"])
+    elif project.directory and Path(project.directory).is_dir():
         docker_cmd.extend(["-v", f"{project.directory}:{project_mount_path}"])
     docker_cmd.extend(["-e", f"SKUA_PROJECT_DIR={project_mount_path}"])
     docker_cmd.extend(["-e", f"SKUA_IMAGE_REQUEST_FILE={project_mount_path}/.skua/image-request.yaml"])
