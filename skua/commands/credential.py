@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: BUSL-1.1
 """skua credential — manage named credential sets."""
 
+import os
 import shutil
 import subprocess
 import sys
@@ -35,6 +36,8 @@ def resolve_credential_sources(cred, agent) -> list:
       2. ``cred.source_dir`` – a directory; ``agent.auth.files`` names what to grab
       3. agent default dir   – derived from ``agent.auth.dir`` (e.g. ``~/.claude``)
 
+    For each auth file, the resolver prefers ``<source_dir>/<file>`` and then
+    tries known fallbacks (for example, ``~/.claude.json`` for Claude).
     When ``cred`` is ``None`` the agent's default directory is used.
     """
     auth_files = []
@@ -49,7 +52,45 @@ def resolve_credential_sources(cred, agent) -> list:
     else:
         src_dir = agent_default_source_dir(agent)
 
-    return [(src_dir / Path(f).name, Path(f).name) for f in auth_files]
+    return [(_resolve_auth_source(src_dir, Path(f).name, agent), Path(f).name) for f in auth_files]
+
+
+def _auth_source_candidates(source_dir: Path, filename: str, agent) -> list:
+    """Return candidate host paths for a credential filename."""
+    candidates = [source_dir / filename]
+    home = Path.home()
+
+    auth_dir = ""
+    if agent and agent.auth and agent.auth.dir:
+        auth_dir = agent.auth.dir.lstrip("/")
+
+    # Preserve legacy Codex lookup from CODEX_HOME when configured.
+    if auth_dir == ".codex":
+        codex_home = os.environ.get("CODEX_HOME", "").strip()
+        if codex_home:
+            candidates.append(Path(codex_home).expanduser() / filename)
+
+    # Some agents store auth metadata at home root (e.g. ~/.claude.json).
+    candidates.append(home / filename)
+
+    unique = []
+    seen = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
+
+
+def _resolve_auth_source(source_dir: Path, filename: str, agent) -> Path:
+    """Return the preferred source path for a credential filename."""
+    candidates = _auth_source_candidates(source_dir, filename, agent)
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return candidates[0]
 
 
 # ── Dispatcher ────────────────────────────────────────────────────────────
@@ -109,11 +150,10 @@ def _credential_status(cred, agent) -> tuple:
         src_dir = agent_default_source_dir(agent) if agent else Path.home()
         label = f"{src_dir} (default)"
 
-    if not src_dir.is_dir():
-        return label, "dir missing"
-
-    ok = sum(1 for f in auth_files if (src_dir / Path(f).name).is_file())
+    ok = sum(1 for f in auth_files if _resolve_auth_source(src_dir, Path(f).name, agent).is_file())
     total = len(auth_files)
+    if not src_dir.is_dir() and ok == 0:
+        return label, "dir missing"
     if total == 0:
         return label, "ok"
     status = "ok" if ok == total else f"{ok}/{total} found"
@@ -193,7 +233,7 @@ def _cmd_add(args):
     else:
         # Auto-detect from agent default dir, then prompt if empty-handed
         default_dir = agent_default_source_dir(agent)
-        if default_dir.is_dir() and _any_auth_files_present(default_dir, agent.auth.files):
+        if default_dir.is_dir() and _any_auth_files_present(default_dir, agent.auth.files, agent):
             print(f"Found credentials in: {default_dir}")
             source_dir = str(default_dir)
         else:
@@ -261,7 +301,7 @@ def _signin_locally(agent_name: str, agent) -> str:
 
     # Auto-detect credential files in the agent's default directory after login
     default_dir = agent_default_source_dir(agent)
-    if default_dir.is_dir() and _any_auth_files_present(default_dir, agent.auth.files):
+    if default_dir.is_dir() and _any_auth_files_present(default_dir, agent.auth.files, agent):
         print(f"\nDetected credentials in: {default_dir}")
         return str(default_dir)
 
@@ -270,10 +310,10 @@ def _signin_locally(agent_name: str, agent) -> str:
     return path_input
 
 
-def _any_auth_files_present(directory: Path, auth_files: list) -> bool:
+def _any_auth_files_present(directory: Path, auth_files: list, agent) -> bool:
     """Return True if at least one expected auth file exists in directory."""
     for fname in auth_files or []:
-        if (directory / Path(fname).name).is_file():
+        if _resolve_auth_source(directory, Path(fname).name, agent).is_file():
             return True
     return False
 
@@ -288,7 +328,7 @@ def _show_file_status(source_dir: Path, agent):
         return
     print("  Credential files:")
     for fname in files:
-        fpath = source_dir / Path(fname).name
+        fpath = _resolve_auth_source(source_dir, Path(fname).name, agent)
         status = "[OK]" if fpath.is_file() else "[--]"
         print(f"    {status} {fpath}")
 

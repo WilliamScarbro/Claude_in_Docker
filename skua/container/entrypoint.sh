@@ -13,6 +13,10 @@ IMAGE_REQUEST_FILE="${SKUA_IMAGE_REQUEST_FILE:-$PROJECT_DIR/.skua/image-request.
 ADAPT_GUIDE_FILE="${SKUA_ADAPT_GUIDE_FILE:-$PROJECT_DIR/.skua/ADAPT.md}"
 TMUX_ENABLE="${SKUA_TMUX_ENABLE:-1}"
 TMUX_SESSION="${SKUA_TMUX_SESSION:-skua}"
+CREDENTIAL_NAME="${SKUA_CREDENTIAL_NAME:-}"
+SSH_KEY_NAME="${SKUA_SSH_KEY_NAME:-}"
+STARTUP_INFO_FILE="/tmp/skua-entrypoint-info.txt"
+SSH_KEY_BASENAME="(none)"
 
 echo "============================================"
 echo "  skua — Dockerized Coding Agent"
@@ -20,6 +24,7 @@ echo "============================================"
 echo ""
 echo "Agent: ${AGENT_NAME}"
 echo "Auth:  ${AUTH_DIR_REL}"
+echo "Credential: ${CREDENTIAL_NAME:-"(none)"}"
 echo ""
 
 # ── Configure git identity from env vars ─────────────────────────────
@@ -32,17 +37,25 @@ else
 fi
 
 # ── SSH key pair (read-only mount -> local copy with correct perms) ───
+SSH_KEY=""
 if [ -d /home/dev/.ssh-mount ] && [ "$(ls -A /home/dev/.ssh-mount 2>/dev/null)" ]; then
     mkdir -p /home/dev/.ssh
     cp /home/dev/.ssh-mount/* /home/dev/.ssh/ 2>/dev/null || true
     chmod 700 /home/dev/.ssh
     chmod 600 /home/dev/.ssh/* 2>/dev/null || true
-    SSH_KEY=$(find /home/dev/.ssh -maxdepth 1 -type f ! -name '*.pub' ! -name 'known_hosts' | head -1)
+    if [ -n "$SSH_KEY_NAME" ] && [ -f "/home/dev/.ssh/${SSH_KEY_NAME}" ]; then
+        SSH_KEY="/home/dev/.ssh/${SSH_KEY_NAME}"
+    else
+        SSH_KEY=$(find /home/dev/.ssh -maxdepth 1 -type f ! -name '*.pub' ! -name 'known_hosts' | head -1)
+    fi
     if [ -n "$SSH_KEY" ]; then
+        SSH_KEY_BASENAME="$(basename "$SSH_KEY")"
         KH_OPT=""
         [ -f /home/dev/.ssh/known_hosts ] && KH_OPT="-o UserKnownHostsFile=/home/dev/.ssh/known_hosts"
         export GIT_SSH_COMMAND="ssh -i $SSH_KEY -o StrictHostKeyChecking=accept-new $KH_OPT"
-        echo "[OK] SSH key loaded: $(basename "$SSH_KEY")"
+        git config --global core.sshCommand "$GIT_SSH_COMMAND"
+        echo "[OK] SSH key loaded: ${SSH_KEY_BASENAME}"
+        echo "[OK] Git SSH command configured for SSH remotes"
     else
         echo "[--] SSH mount found but no private key detected"
     fi
@@ -125,6 +138,31 @@ else
 fi
 
 echo ""
+
+# ── Startup info for first tmux session creation ──────────────────────
+cat > "$STARTUP_INFO_FILE" <<EOF
+============================================
+  ____  _  ___   _    _       
+ / ___|| |/ / | | |  / \      
+ \___ \| ' /| | | | / _ \      
+  ___) | . \| |_| |/ ___ \    
+ |____/|_|\_\\___//_/   \_\   
+    skua — Dockerized Agents      
+============================================
+
+Agent: ${AGENT_NAME}
+Auth:  ${AUTH_DIR_REL}
+Credential: ${CREDENTIAL_NAME:-"(none)"}
+SSH key: ${SSH_KEY_BASENAME}
+Project: ${PROJECT_DIR}
+
+tmux quickstart:
+  Ctrl-b d      Detach
+  Ctrl-b c      New window
+  Ctrl-b n/p    Next/prev window
+  Ctrl-b w      Window picker
+============================================
+EOF
 
 # ── Login prompts if needed ──────────────────────────────────────────
 if [ ${#NEEDS_LOGIN[@]} -gt 0 ]; then

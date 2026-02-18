@@ -511,6 +511,7 @@ def build_run_command(
     if ssh_key and Path(ssh_key).is_file():
         key_name = Path(ssh_key).name
         docker_cmd.extend(["-v", f"{ssh_key}:/home/dev/.ssh-mount/{key_name}:ro"])
+        docker_cmd.extend(["-e", f"SKUA_SSH_KEY_NAME={key_name}"])
         pub_key = f"{ssh_key}.pub"
         if Path(pub_key).is_file():
             docker_cmd.extend(["-v", f"{pub_key}:/home/dev/.ssh-mount/{key_name}.pub:ro"])
@@ -557,6 +558,7 @@ def build_run_command(
     docker_cmd.extend(["-e", f"SKUA_AGENT_LOGIN_COMMAND={login_command}"])
     docker_cmd.extend(["-e", f"SKUA_AUTH_DIR={auth_dir}"])
     docker_cmd.extend(["-e", f"SKUA_AUTH_FILES={','.join(auth_files)}"])
+    docker_cmd.extend(["-e", f"SKUA_CREDENTIAL_NAME={project.credential or '(none)'}"])
 
     if environment.persistence.mode == "bind":
         data_dir.mkdir(parents=True, exist_ok=True)
