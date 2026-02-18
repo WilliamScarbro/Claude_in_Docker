@@ -6,7 +6,7 @@ from skua.commands.init import cmd_init
 from skua.commands.add import cmd_add
 from skua.commands.remove import cmd_remove
 from skua.commands.run import cmd_run
-from skua.commands.prep import cmd_prep
+from skua.commands.adapt import cmd_adapt
 from skua.commands.list_cmd import cmd_list
 from skua.commands.clean import cmd_clean
 from skua.commands.purge import cmd_purge
@@ -15,7 +15,7 @@ from skua.commands.validate_cmd import cmd_validate
 from skua.commands.describe import cmd_describe
 from skua.commands.credential import cmd_credential
 __all__ = [
-    "cmd_build", "cmd_init", "cmd_add", "cmd_remove", "cmd_run", "cmd_prep",
+    "cmd_build", "cmd_init", "cmd_add", "cmd_remove", "cmd_run", "cmd_adapt",
     "cmd_list", "cmd_clean", "cmd_purge", "cmd_config", "cmd_validate",
     "cmd_describe", "cmd_credential",
 ]
