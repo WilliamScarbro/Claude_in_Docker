@@ -123,6 +123,11 @@ def main():
         help="Include git status column for repo projects",
     )
     p_list.add_argument(
+        "-i", "--image",
+        action="store_true",
+        help="Include image column",
+    )
+    p_list.add_argument(
         "--local",
         action="store_true",
         help="Only show projects running on the local host",

@@ -147,6 +147,7 @@ def cmd_list(args):
     show_security = bool(getattr(args, "security", False))
     show_git = bool(getattr(args, "git", False))
     local_only = bool(getattr(args, "local", False))
+    show_image = bool(getattr(args, "image", False))
     g = store.load_global()
     image_name_base = g.get("imageName", "skua-base")
 
@@ -167,7 +168,8 @@ def cmd_list(args):
     columns.append(("SOURCE", 38))
     if show_git:
         columns.append(("GIT", 9))
-    columns.append(("IMAGE", 36))
+    if show_image:
+        columns.append(("IMAGE", 36))
     if show_agent:
         columns.extend([("AGENT", 10), ("CREDENTIAL", 20)])
     if show_security:
@@ -205,7 +207,8 @@ def cmd_list(args):
         if show_git:
             git_status = _git_status(project, store) or "-"
             row.append(f"{git_status:<9}")
-        row.append(f"{img_name:<36}")
+        if show_image:
+            row.append(f"{img_name:<36}")
 
         if show_agent:
             credential = project.credential or "(none)"
