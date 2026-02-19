@@ -121,6 +121,17 @@ class TestProjectAdaptHelpers(unittest.TestCase):
         self.assertIn("Infer dependencies by reading project files", prompt)
         self.assertIn("missing tool/system dependency blocks progress", prompt)
 
+    def test_agent_prompt_includes_build_error_context(self):
+        from skua.commands.adapt import _agent_prompt, _format_build_error_context
+
+        dockerfile_text = "FROM debian:bookworm-slim\nRUN echo ok\n"
+        error_output = "RUN bad-command: not found"
+        build_error = _format_build_error_context(error_output, dockerfile_text)
+        prompt = _agent_prompt("proj", "claude", build_error=build_error)
+        self.assertIn("Dockerfile used for build", prompt)
+        self.assertIn("Build error output", prompt)
+        self.assertIn("RUN bad-command", prompt)
+
     def test_project_has_pending_request_detects_unapplied_changes(self):
         from skua.commands.adapt import _project_has_pending_request
 

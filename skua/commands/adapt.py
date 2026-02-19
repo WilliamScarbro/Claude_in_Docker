@@ -434,7 +434,8 @@ def _agent_prompt(project_name: str, agent_name: str, build_error: str = "") -> 
     if build_error:
         base += (
             "\n\nThe previous Docker build FAILED. Update .skua/image-request.yaml to fix it. "
-            "Build error output:\n\n"
+            "Use the generated Dockerfile and build error below to decide what to change. "
+            "Build context:\n\n"
             f"{build_error}"
         )
     return base
@@ -701,6 +702,30 @@ def _current_image_name(store: ConfigStore, project) -> str:
     return image_name_for_project(image_name_base, project)
 
 
+def _read_last_dockerfile(container_dir: Path, max_chars: int = 8000) -> str:
+    """Return the last generated Dockerfile content, truncated."""
+    build_path = container_dir / ".build-context" / "Dockerfile"
+    if not build_path.is_file():
+        return ""
+    try:
+        text = build_path.read_text()
+    except OSError:
+        return ""
+    if max_chars and len(text) > max_chars:
+        return text[:max_chars] + "\n... (truncated)"
+    return text
+
+
+def _format_build_error_context(error_output: str, dockerfile_text: str) -> str:
+    """Format build error context for the agent prompt."""
+    parts = []
+    if dockerfile_text:
+        parts.append("Dockerfile used for build:\n\n" + dockerfile_text.rstrip())
+    if error_output:
+        parts.append("Build error output:\n\n" + error_output.rstrip())
+    return "\n\n".join(parts).strip()
+
+
 def _build_project_image(store: ConfigStore, project, agent) -> str:
     """Build the adapted project image. Returns error output on failure, empty string on success."""
     g = store.load_global()
@@ -747,6 +772,8 @@ def _build_project_image(store: ConfigStore, project, agent) -> str:
     )
     if not success:
         print(f"[adapt] Image build failed: {image_name}")
-        return error_output or "Docker build failed."
+        dockerfile_text = _read_last_dockerfile(container_dir)
+        context = _format_build_error_context(error_output or "Docker build failed.", dockerfile_text)
+        return context or "Docker build failed."
     print(f"Image ready: {image_name}")
     return ""
