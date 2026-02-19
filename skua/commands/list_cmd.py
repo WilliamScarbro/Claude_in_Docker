@@ -6,6 +6,7 @@ from urllib.parse import urlsplit
 
 from skua.config import ConfigStore
 from skua.docker import get_running_skua_containers
+from skua.project_adapt import image_request_path, load_image_request, request_changes_project
 
 
 def _shorten_home_path(path: str) -> str:
@@ -59,10 +60,25 @@ def _format_source(project) -> str:
     return "(none)"
 
 
+def _has_pending_adapt_request(project) -> bool:
+    """Return True when project has unapplied image-request changes."""
+    directory = str(getattr(project, "directory", "") or "").strip()
+    if not directory:
+        return False
+    project_dir = Path(directory).expanduser()
+    if not project_dir.is_dir():
+        return False
+    req_path = image_request_path(project_dir)
+    if not req_path.is_file():
+        return False
+    request = load_image_request(req_path)
+    return request_changes_project(project, request)
+
+
 def cmd_list(args):
     store = ConfigStore()
     project_names = store.list_resources("Project")
-    running = get_running_skua_containers()
+    running_by_host = {"": set(get_running_skua_containers())}
     show_agent = bool(getattr(args, "agent", False))
     show_security = bool(getattr(args, "security", False))
 
@@ -88,9 +104,22 @@ def cmd_list(args):
     print(" ".join(f"{title:<{width}}" for title, width in columns))
     print("-" * (sum(width for _, width in columns) + (len(columns) - 1)))
 
+    def _running_for_host(host: str) -> set:
+        normalized = host or ""
+        if normalized not in running_by_host:
+            running_by_host[normalized] = set(get_running_skua_containers(host=normalized))
+        return running_by_host[normalized]
+
+    pending_count = 0
     for name, project in projects:
         container_name = f"skua-{name}"
+        host = getattr(project, "host", "") or ""
+        running = _running_for_host(host)
+        pending_adapt = _has_pending_adapt_request(project)
         status = "running" if container_name in running else "stopped"
+        if pending_adapt:
+            status += "*"
+            pending_count += 1
         row = [f"{name:<16}"]
 
         if show_host:
@@ -109,5 +138,11 @@ def cmd_list(args):
         print(" ".join(row))
 
     print()
-    running_count = sum(1 for n in project_names if f"skua-{n}" in running)
-    print(f"{len(project_names)} project(s), {running_count} running")
+    running_count = 0
+    for name, project in projects:
+        host = getattr(project, "host", "") or ""
+        if f"skua-{name}" in _running_for_host(host):
+            running_count += 1
+    print(f"{len(project_names)} project(s), {running_count} running, {pending_count} pending adapt")
+    if pending_count:
+        print("  * pending image-request changes")
