@@ -9,10 +9,9 @@ from skua.commands.stop import cmd_stop
 
 def cmd_restart(args):
     name = str(getattr(args, "name", "") or "").strip()
-    force = bool(getattr(args, "force", False))
     if not name:
         print("Error: Provide a project name.")
         return
-    if not cmd_stop(SimpleNamespace(name=name, force=force)):
+    if not cmd_stop(SimpleNamespace(name=name, force=True)):
         return
     cmd_run(SimpleNamespace(name=name))
