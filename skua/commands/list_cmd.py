@@ -172,6 +172,16 @@ def _container_image_name(container_name: str, host: str = "") -> str:
         return ""
     return result.stdout.strip()
 
+
+def _short_image_id(image_id: str) -> str:
+    """Return a 12-char image ID without the sha256: prefix."""
+    if not image_id:
+        return ""
+    cleaned = image_id.strip()
+    if cleaned.startswith("sha256:"):
+        cleaned = cleaned[7:]
+    return cleaned[:12]
+
 def _container_image_name(container_name: str, host: str = "") -> str:
     """Return image name recorded on the container, or empty string."""
     cmd = ["docker", "inspect", "--format", "{{.Config.Image}}", container_name]
@@ -287,14 +297,11 @@ def cmd_list(args):
             img_name = image_name_for_project(image_name_base, project)
             project_id = _image_id(img_name, host=host)
             container_id = _container_image_id(container_name, host=host)
-            container_name_value = _container_image_name(container_name, host=host)
-            if container_name_value and container_name_value == img_name:
-                running_image_values[name] = "-"
-                continue
             if project_id and container_id and project_id == container_id:
                 running_image_values[name] = "-"
                 continue
-            running_name = container_id or container_name_value or "-"
+            display_id = _short_image_id(container_id)
+            running_name = display_id or _container_image_name(container_name, host=host) or "-"
             running_image_values[name] = running_name
             if running_name != "-":
                 needs_running_image = True
