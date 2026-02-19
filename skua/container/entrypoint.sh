@@ -219,12 +219,14 @@ if [ ${#NEEDS_LOGIN[@]} -gt 0 ]; then
 fi
 
 echo "Usage:"
-echo "  ${AGENT_COMMAND}         -> Start ${AGENT_NAME}"
-if [ "$AGENT_COMMAND" = "claude" ]; then
+if [ "$AGENT_NAME" = "claude" ]; then
+    echo "  claude         -> Start Claude"
     echo "  claude-dsp     -> Start with --dangerously-skip-permissions"
-fi
-if [ "$AGENT_COMMAND" = "codex" ]; then
+elif [ "$AGENT_NAME" = "codex" ]; then
+    echo "  codex          -> Start Codex"
     echo "  codex-dsp      -> Start with --dangerously-bypass-approvals-and-sandbox"
+else
+    echo "  ${AGENT_COMMAND}         -> Start ${AGENT_NAME}"
 fi
 if [ "$TMUX_ENABLE" = "1" ] && command -v tmux &>/dev/null; then
     echo "  tmux attach -t ${TMUX_SESSION} -> Reattach session"
