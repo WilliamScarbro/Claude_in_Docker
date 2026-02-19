@@ -122,6 +122,11 @@ def main():
         action="store_true",
         help="Include git status column for repo projects",
     )
+    p_list.add_argument(
+        "--local",
+        action="store_true",
+        help="Only show projects running on the local host",
+    )
 
     # clean
     p_clean = sub.add_parser("clean", help="Clean persisted agent credentials")

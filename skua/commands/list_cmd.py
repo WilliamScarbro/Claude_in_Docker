@@ -146,6 +146,7 @@ def cmd_list(args):
     show_agent = bool(getattr(args, "agent", False))
     show_security = bool(getattr(args, "security", False))
     show_git = bool(getattr(args, "git", False))
+    local_only = bool(getattr(args, "local", False))
     g = store.load_global()
     image_name_base = g.get("imageName", "skua-base")
 
@@ -155,6 +156,8 @@ def cmd_list(args):
 
     projects = [(name, store.resolve_project(name)) for name in project_names]
     projects = [(name, p) for name, p in projects if p is not None]
+    if local_only:
+        projects = [(name, p) for name, p in projects if not getattr(p, "host", "")]
 
     show_host = any(getattr(p, "host", "") for _, p in projects)
 
