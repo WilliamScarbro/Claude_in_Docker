@@ -288,11 +288,13 @@ def cmd_list(args):
             project_id = _image_id(img_name, host=host)
             container_id = _container_image_id(container_name, host=host)
             container_name_value = _container_image_name(container_name, host=host)
-            if container_name_value == img_name:
-                if not project_id or not container_id or project_id == container_id:
-                    running_image_values[name] = "-"
-                    continue
-            running_name = container_name_value or container_id or "-"
+            if container_name_value and container_name_value == img_name:
+                running_image_values[name] = "-"
+                continue
+            if project_id and container_id and project_id == container_id:
+                running_image_values[name] = "-"
+                continue
+            running_name = container_id or container_name_value or "-"
             running_image_values[name] = running_name
             if running_name != "-":
                 needs_running_image = True
