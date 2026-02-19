@@ -12,6 +12,8 @@ import yaml
 ADAPT_DIRNAME = ".skua"
 ADAPT_GUIDE_NAME = "ADAPT.md"
 IMAGE_REQUEST_NAME = "image-request.yaml"
+AGENTS_HINT_NAME = "AGENTS.md"
+CLAUDE_HINT_NAME = "CLAUDE.md"
 
 
 def adapt_dir(project_dir: Path) -> Path:
@@ -29,6 +31,16 @@ def image_request_path(project_dir: Path) -> Path:
     return adapt_dir(project_dir) / IMAGE_REQUEST_NAME
 
 
+def agents_hint_path(project_dir: Path) -> Path:
+    """Return repository-level AGENTS.md path."""
+    return project_dir / AGENTS_HINT_NAME
+
+
+def claude_hint_path(project_dir: Path) -> Path:
+    """Return repository-level CLAUDE.md path."""
+    return project_dir / CLAUDE_HINT_NAME
+
+
 def ensure_adapt_workspace(project_dir: Path, project_name: str, agent_name: str) -> tuple[Path, Path]:
     """Create per-project adapt files if missing and return (guide, request) paths."""
     d = adapt_dir(project_dir)
@@ -42,11 +54,21 @@ def ensure_adapt_workspace(project_dir: Path, project_name: str, agent_name: str
     if not request.exists():
         request.write_text(_image_request_template_text())
 
+    agents_hint = agents_hint_path(project_dir)
+    if not agents_hint.exists():
+        agents_hint.write_text(_agents_hint_text(project_name=project_name))
+
+    claude_hint = claude_hint_path(project_dir)
+    if not claude_hint.exists():
+        claude_hint.write_text(_claude_hint_text(project_name=project_name))
+
     _ensure_git_exclude(
         project_dir,
         [
             f"{ADAPT_DIRNAME}/{IMAGE_REQUEST_NAME}",
             f"{ADAPT_DIRNAME}/{ADAPT_GUIDE_NAME}",
+            AGENTS_HINT_NAME,
+            CLAUDE_HINT_NAME,
         ],
     )
     return guide, request
@@ -109,6 +131,27 @@ def request_has_updates(request: dict) -> bool:
     )
 
 
+def request_changes_project(project, request: dict) -> bool:
+    """True when applying request would change project image configuration."""
+    req = normalize_image_request(request or {})
+    if not request_has_updates(req):
+        return False
+
+    current = (
+        str(getattr(project.image, "base_image", "") or "").strip(),
+        str(getattr(project.image, "from_image", "") or "").strip(),
+        list(getattr(project.image, "extra_packages", []) or []),
+        list(getattr(project.image, "extra_commands", []) or []),
+    )
+    desired = (
+        req["baseImage"],
+        req["fromImage"],
+        req["packages"],
+        req["commands"],
+    )
+    return current != desired
+
+
 def apply_image_request_to_project(project, request: dict) -> bool:
     """Apply normalized request fields to project.image; bump version if changed."""
     req = normalize_image_request(request or {})
@@ -152,16 +195,19 @@ def _adapt_guide_text(project_name: str, agent_name: str) -> str:
 
 Use this workflow to let `{agent_name}` suggest container image changes without writing a Dockerfile.
 
-1. Run the project container: `skua run {project_name}`
-2. Ask `{agent_name}` to inspect the repo and update:
+1. During normal coding, when missing tools/dependencies block work, update:
    - `.skua/{IMAGE_REQUEST_NAME}`
-3. On the host, apply that request:
+2. On the host, apply latent request changes:
    - `skua adapt {project_name}`
-4. Start again with updated image config:
+3. Optional: ask Skua to run `{agent_name}` to discover wishlist changes automatically:
+   - `skua adapt {project_name} --discover`
+4. Start/restart with updated image config:
    - `skua run {project_name}`
 
 Request rules:
 - Prefer `packages` for apt package names.
+- Only list missing packages/tools (do not include packages already installed).
+- Infer required tooling from project files and real blockers encountered while working.
 - Use `baseImage` to switch to a different base image.
 - Use `fromImage` to adapt an existing working image as the parent image.
 - Use `commands` for additional setup commands.
@@ -187,6 +233,30 @@ packages: []
 
 # Additional setup commands (RUN lines) for generated skua Dockerfile.
 commands: []
+"""
+
+
+def _agents_hint_text(project_name: str) -> str:
+    return f"""# Skua Agent Instructions ({project_name})
+
+You are working inside a Docker container for this project.
+
+When missing system tools/dependencies block progress:
+- Update `.skua/{IMAGE_REQUEST_NAME}` immediately.
+- Keep requests minimal and include only missing items.
+- Infer needs from project files and real execution blockers.
+
+See `.skua/{ADAPT_GUIDE_NAME}` for the full workflow.
+"""
+
+
+def _claude_hint_text(project_name: str) -> str:
+    return f"""# Claude Instructions ({project_name})
+
+Follow `AGENTS.md` in this repository.
+
+When blocked by missing system dependencies, update:
+- `.skua/{IMAGE_REQUEST_NAME}`
 """
 
 
