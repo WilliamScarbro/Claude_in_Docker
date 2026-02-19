@@ -355,10 +355,9 @@ def _sync_auth_from_host(data_dir: Path, cred, agent) -> int:
 
 
 def _ensure_runtime_image(store: ConfigStore, project, sec, agent) -> str:
-    """Return an existing project image name, building lazily when needed."""
+    """Return an existing runtime image name, building lazily when needed."""
     g = store.load_global()
-    image_name_base = g.get("imageName", "skua-base")
-    image_name = image_name_for_project(image_name_base, project)
+    image_name = _runtime_image_name(store, project)
     if image_exists(image_name):
         print(f"[adapt] Runtime image ready: {image_name}")
         return image_name
@@ -381,7 +380,7 @@ def _ensure_runtime_image(store: ConfigStore, project, sec, agent) -> str:
     resolved_base_image, extra_packages, extra_commands = resolve_project_image_inputs(
         default_base_image=base_image,
         agent=agent,
-        project=project,
+        project=None,
         global_extra_packages=global_extra_packages,
         global_extra_commands=global_extra_commands,
     )
@@ -700,6 +699,13 @@ def _current_image_name(store: ConfigStore, project) -> str:
     g = store.load_global()
     image_name_base = g.get("imageName", "skua-base")
     return image_name_for_project(image_name_base, project)
+
+
+def _runtime_image_name(store: ConfigStore, project) -> str:
+    """Return the runtime image name used for agent adapt sessions."""
+    g = store.load_global()
+    image_name_base = g.get("imageName", "skua-base")
+    return f"{image_name_for_project(image_name_base, project)}-runtime"
 
 
 def _read_last_dockerfile(container_dir: Path, max_chars: int = 8000) -> str:
