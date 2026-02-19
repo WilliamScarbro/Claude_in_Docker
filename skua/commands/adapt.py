@@ -174,7 +174,12 @@ def cmd_adapt(args):
     if should_build:
         print("[adapt] Step 3: Build adapted image")
         build_error = _build_project_image(store, project, agent)
-        if build_error and discover_mode:
+        retry_count = 0
+        max_retries = 3
+        while build_error:
+            if retry_count >= max_retries:
+                print("[adapt] Reached maximum build retries; aborting.")
+                break
             print("[adapt] Build failed; asking agent to revise image request...")
             _run_agent_adapt_session(store, project, env, sec, agent, build_error=build_error)
             retry_request = load_image_request(request_path)
@@ -185,14 +190,16 @@ def cmd_adapt(args):
             retry_changed = apply_image_request_to_project(project, retry_request)
             if retry_changed:
                 store.save_resource(project)
-                print(f"Applied revised image request from: {request_source}")
+                print(f"Applied revised image request from: {request_path}")
                 print(f"Project image version: v{project.image.version}")
                 _print_project_image_summary(project)
                 write_applied_image_request(request_path, retry_request, project.image.version)
-                print("[adapt] Step 3 (retry): Build adapted image")
+                retry_count += 1
+                print(f"[adapt] Step 3 (retry {retry_count}): Build adapted image")
                 build_error = _build_project_image(store, project, agent)
             else:
                 print("[adapt] Agent did not update the image request; cannot retry build.")
+                break
         if build_error:
             print("Error: Image build failed. Fix the image request and re-run 'skua adapt'.")
             sys.exit(1)

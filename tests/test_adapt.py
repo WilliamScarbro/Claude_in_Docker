@@ -482,6 +482,50 @@ class TestAdaptCommand(unittest.TestCase):
             updated = store.load_project("proj")
             self.assertIn("make", updated.image.extra_packages)
 
+    def test_cmd_adapt_build_retries_after_agent_revises_request(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = Path(tmpdir) / "repo"
+            project_dir.mkdir()
+            store = self._new_store(Path(tmpdir) / "cfg")
+            store.save_resource(Project(name="proj", directory=str(project_dir), agent="codex"))
+
+            _, request_path = ensure_adapt_workspace(project_dir, "proj", "codex")
+            with open(request_path, "w") as f:
+                yaml.dump(
+                    {"schemaVersion": 1, "status": "ready", "packages": ["git"]},
+                    f, default_flow_style=False, sort_keys=False,
+                )
+
+            build_calls = []
+            def fake_build(store, project, agent):
+                build_calls.append(len(build_calls))
+                if len(build_calls) == 1:
+                    return "RUN bad-command: not found"
+                return ""
+
+            session_calls = []
+            def fake_session(store, project, env, sec, agent, build_error=""):
+                session_calls.append(build_error)
+                packages = ["git", "make", "cmake"]
+                with open(request_path, "w") as f:
+                    yaml.dump(
+                        {"schemaVersion": 1, "status": "ready", "packages": packages},
+                        f, default_flow_style=False, sort_keys=False,
+                    )
+
+            with (
+                mock.patch("skua.commands.adapt.ConfigStore", return_value=store),
+                mock.patch("skua.commands.adapt._run_agent_adapt_session", side_effect=fake_session),
+                mock.patch("skua.commands.adapt._build_project_image", side_effect=fake_build),
+            ):
+                cmd_adapt(self._adapt_args("proj", build=True))
+
+            self.assertEqual(1, len(session_calls))
+            self.assertIn("not found", session_calls[0])
+            self.assertEqual(2, len(build_calls))
+            updated = store.load_project("proj")
+            self.assertIn("cmake", updated.image.extra_packages)
+
     def test_cmd_adapt_respects_user_rejection_before_apply(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = Path(tmpdir) / "repo"
