@@ -5,7 +5,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from skua.config import ConfigStore
-from skua.docker import get_running_skua_containers
+from skua.docker import get_running_skua_containers, image_exists, image_name_for_project
 from skua.project_adapt import image_request_path, load_image_request, request_changes_project
 
 
@@ -81,6 +81,8 @@ def cmd_list(args):
     running_by_host = {"": set(get_running_skua_containers())}
     show_agent = bool(getattr(args, "agent", False))
     show_security = bool(getattr(args, "security", False))
+    g = store.load_global()
+    image_name_base = g.get("imageName", "skua-base")
 
     if not project_names:
         print("No projects configured. Add one with: skua add <name> --dir <path> or --repo <url>")
@@ -116,7 +118,11 @@ def cmd_list(args):
         host = getattr(project, "host", "") or ""
         running = _running_for_host(host)
         pending_adapt = _has_pending_adapt_request(project)
-        status = "running" if container_name in running else "stopped"
+        if container_name in running:
+            status = "running"
+        else:
+            img_name = image_name_for_project(image_name_base, project)
+            status = "built" if image_exists(img_name) else "missing"
         if pending_adapt:
             status += "*"
             pending_count += 1

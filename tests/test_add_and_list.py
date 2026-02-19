@@ -248,6 +248,7 @@ class TestListColumns(unittest.TestCase):
         from skua.commands.list_cmd import cmd_list
 
         store = MockStore.return_value
+        store.load_global.return_value = {}
         store.list_resources.return_value = ["demo"]
         store.resolve_project.return_value = Project(
             name="demo",
@@ -284,6 +285,7 @@ class TestListColumns(unittest.TestCase):
         from skua.commands.list_cmd import cmd_list
 
         store = MockStore.return_value
+        store.load_global.return_value = {}
         store.list_resources.return_value = ["demo"]
         store.resolve_project.return_value = Project(
             name="demo",
@@ -312,12 +314,14 @@ class TestListColumns(unittest.TestCase):
         self.assertIn("open", out)
         self.assertIn("bridge", out)
 
+    @mock.patch("skua.commands.list_cmd.image_exists", return_value=False)
     @mock.patch("skua.commands.list_cmd.get_running_skua_containers")
     @mock.patch("skua.commands.list_cmd.ConfigStore")
-    def test_list_checks_remote_host_status(self, MockStore, mock_running):
+    def test_list_checks_remote_host_status(self, MockStore, mock_running, _mock_image_exists):
         from skua.commands.list_cmd import cmd_list
 
         store = MockStore.return_value
+        store.load_global.return_value = {}
         store.list_resources.return_value = ["local", "qar"]
 
         projects = {
@@ -359,12 +363,42 @@ class TestListColumns(unittest.TestCase):
         mock_running.assert_any_call()
         mock_running.assert_any_call(host="qar")
 
+    @mock.patch("skua.commands.list_cmd.image_exists")
+    @mock.patch("skua.commands.list_cmd.get_running_skua_containers", return_value=[])
+    @mock.patch("skua.commands.list_cmd.ConfigStore")
+    def test_list_status_reflects_image_existence(self, MockStore, _mock_running, mock_image_exists):
+        from skua.commands.list_cmd import cmd_list
+
+        store = MockStore.return_value
+        store.load_global.return_value = {}
+        store.list_resources.return_value = ["built-proj", "missing-proj"]
+
+        projects = {
+            "built-proj": Project(name="built-proj", directory="/tmp/bp", agent="claude"),
+            "missing-proj": Project(name="missing-proj", directory="/tmp/mp", agent="claude"),
+        }
+        store.resolve_project.side_effect = lambda name: projects[name]
+        store.load_environment.return_value = SimpleNamespace(network=SimpleNamespace(mode="bridge"))
+
+        # built-proj has image, missing-proj does not
+        mock_image_exists.side_effect = lambda name: "built-proj" in str(name)
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_list(argparse.Namespace())
+        out = buf.getvalue()
+
+        self.assertIn("built", out)
+        self.assertIn("missing", out)
+        self.assertNotIn("stopped", out)
+
     @mock.patch("skua.commands.list_cmd.get_running_skua_containers")
     @mock.patch("skua.commands.list_cmd.ConfigStore")
     def test_list_caches_remote_host_status_per_host(self, MockStore, mock_running):
         from skua.commands.list_cmd import cmd_list
 
         store = MockStore.return_value
+        store.load_global.return_value = {}
         store.list_resources.return_value = ["qar-a", "qar-b"]
 
         def _project(name):

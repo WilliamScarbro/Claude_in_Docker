@@ -171,7 +171,7 @@ def cmd_adapt(args):
             write_applied_image_request(request_path, request, project.image.version)
 
     should_build = bool(getattr(args, "build", False) or discover_mode)
-    if should_build and changed:
+    if should_build:
         print("[adapt] Step 3: Build adapted image")
         build_error = _build_project_image(store, project, agent)
         if build_error and discover_mode:
@@ -197,7 +197,14 @@ def cmd_adapt(args):
             print("Error: Image build failed. Fix the image request and re-run 'skua adapt'.")
             sys.exit(1)
     else:
-        print(f"Next: run 'skua run {project.name}' to build/use the updated image.")
+        image_name = _current_image_name(store, project)
+        built = image_exists(image_name)
+        img_status = "built" if built else "not yet built"
+        print(f"Image: {image_name} ({img_status})")
+        if built:
+            print(f"Next: run 'skua run {project.name}' to start the container.")
+        else:
+            print(f"Next: run 'skua adapt {project.name} --build' to build the image.")
 
 
 def _project_has_pending_request(project) -> bool:
@@ -680,6 +687,13 @@ def _print_project_image_summary(project):
         print(f"  commands:     (none)")
 
 
+def _current_image_name(store: ConfigStore, project) -> str:
+    """Return the image name that would be used for this project right now."""
+    g = store.load_global()
+    image_name_base = g.get("imageName", "skua-base")
+    return image_name_for_project(image_name_base, project)
+
+
 def _build_project_image(store: ConfigStore, project, agent) -> str:
     """Build the adapted project image. Returns error output on failure, empty string on success."""
     g = store.load_global()
@@ -727,4 +741,5 @@ def _build_project_image(store: ConfigStore, project, agent) -> str:
     if not success:
         print(f"[adapt] Image build failed: {image_name}")
         return error_output or "Docker build failed."
+    print(f"Image ready: {image_name}")
     return ""
