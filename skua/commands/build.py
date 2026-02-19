@@ -120,7 +120,7 @@ def cmd_build(args):
                 f"-> Image '{image_name}' missing; building for project "
                 f"'{project.name}' (agent '{agent.name}') from '{resolved_base_image}'..."
             )
-        success = build_image(
+        success, _ = build_image(
             container_dir=container_dir,
             image_name=image_name,
             security=security,

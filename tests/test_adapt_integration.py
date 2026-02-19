@@ -93,6 +93,7 @@ class TestAdaptIntegration(unittest.TestCase):
                 clear=False,
                 write_only=False,
                 build=False,
+                force=False,
             )
 
             built_images = []

@@ -696,7 +696,7 @@ def cmd_run(args):
             global_extra_commands=global_extra_commands,
         )
 
-        success = build_image(
+        success, _ = build_image(
             container_dir=container_dir,
             image_name=image_name,
             security=build_security,

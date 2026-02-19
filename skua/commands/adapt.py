@@ -147,12 +147,16 @@ def cmd_adapt(args):
             print(f"Run 'skua adapt {project.name} --discover' to generate a new wishlist.")
         return
 
-    if _is_interactive_tty():
+    force = bool(getattr(args, "force", False))
+    if _is_interactive_tty() and not force:
         if not _confirm_apply_wishlist(project.agent, request):
             print("Adapt cancelled before applying wishlist.")
             return
     else:
-        print("[adapt] Non-interactive mode: auto-approving wishlist.")
+        if force:
+            print("[adapt] --force: auto-approving wishlist.")
+        else:
+            print("[adapt] Non-interactive mode: auto-approving wishlist.")
 
     changed = apply_image_request_to_project(project, request)
     print("[adapt] Step 2: Apply image request")
@@ -169,7 +173,29 @@ def cmd_adapt(args):
     should_build = bool(getattr(args, "build", False) or discover_mode)
     if should_build and changed:
         print("[adapt] Step 3: Build adapted image")
-        _build_project_image(store, project, agent)
+        build_error = _build_project_image(store, project, agent)
+        if build_error and discover_mode:
+            print("[adapt] Build failed; asking agent to revise image request...")
+            _run_agent_adapt_session(store, project, env, sec, agent, build_error=build_error)
+            retry_request = load_image_request(request_path)
+            if _is_interactive_tty() and not force:
+                if not _confirm_apply_wishlist(project.agent, retry_request):
+                    print("Adapt cancelled before applying revised wishlist.")
+                    sys.exit(1)
+            retry_changed = apply_image_request_to_project(project, retry_request)
+            if retry_changed:
+                store.save_resource(project)
+                print(f"Applied revised image request from: {request_source}")
+                print(f"Project image version: v{project.image.version}")
+                _print_project_image_summary(project)
+                write_applied_image_request(request_path, retry_request, project.image.version)
+                print("[adapt] Step 3 (retry): Build adapted image")
+                build_error = _build_project_image(store, project, agent)
+            else:
+                print("[adapt] Agent did not update the image request; cannot retry build.")
+        if build_error:
+            print("Error: Image build failed. Fix the image request and re-run 'skua adapt'.")
+            sys.exit(1)
     else:
         print(f"Next: run 'skua run {project.name}' to build/use the updated image.")
 
@@ -241,6 +267,7 @@ def _cmd_adapt_all(store: ConfigStore, args):
             clear=False,
             write_only=False,
             build=build_all,
+            force=bool(getattr(args, "force", False)),
         )
         try:
             cmd_adapt(project_args)
@@ -344,7 +371,7 @@ def _ensure_runtime_image(store: ConfigStore, project, sec, agent) -> str:
         global_extra_packages=global_extra_packages,
         global_extra_commands=global_extra_commands,
     )
-    success = build_image(
+    success, _ = build_image(
         container_dir=container_dir,
         image_name=image_name,
         security=build_security,
@@ -376,8 +403,8 @@ def _shell_join(argv: list) -> str:
     return " ".join(shlex.quote(str(token)) for token in (argv or []))
 
 
-def _agent_prompt(project_name: str, agent_name: str) -> str:
-    return (
+def _agent_prompt(project_name: str, agent_name: str, build_error: str = "") -> str:
+    base = (
         f"You are adapting the project '{project_name}'. "
         "You are running inside the project's Docker container environment. "
         "Inspect the current repository and update only .skua/image-request.yaml. "
@@ -390,6 +417,13 @@ def _agent_prompt(project_name: str, agent_name: str) -> str:
         "baseImage or fromImage when needed. "
         "Do not modify any other file."
     )
+    if build_error:
+        base += (
+            "\n\nThe previous Docker build FAILED. Update .skua/image-request.yaml to fix it. "
+            "Build error output:\n\n"
+            f"{build_error}"
+        )
+    return base
 
 
 def _template_uses_shell(template: str) -> bool:
@@ -466,13 +500,18 @@ def _request_preview_lines(request: dict) -> list:
     base_image = str(request.get("baseImage", "") or "").strip() or "(unchanged)"
     packages = [str(p).strip() for p in list(request.get("packages", []) or []) if str(p).strip()]
     commands = [str(c).strip() for c in list(request.get("commands", []) or []) if str(c).strip()]
-    return [
+    lines = [
         f"summary: {summary}",
         f"fromImage: {from_image}",
         f"baseImage: {base_image}",
         f"packages: {', '.join(packages) if packages else '(none)'}",
-        f"commands: {len(commands)} command(s)",
     ]
+    if commands:
+        for cmd in commands:
+            lines.append(f"command: {cmd}")
+    else:
+        lines.append("commands: (none)")
+    return lines
 
 
 def _is_interactive_tty() -> bool:
@@ -491,9 +530,9 @@ def _confirm_apply_wishlist(agent_name: str, request: dict) -> bool:
     return answer != "n"
 
 
-def _agent_adapt_command(agent, project_name: str) -> list:
+def _agent_adapt_command(agent, project_name: str, build_error: str = "") -> list:
     agent_name = (agent.name or "").strip().lower()
-    prompt = _agent_prompt(project_name, agent_name)
+    prompt = _agent_prompt(project_name, agent_name, build_error)
 
     template = str(getattr(agent.runtime, "adapt_command", "") or "").strip()
     if template:
@@ -555,7 +594,7 @@ def _ensure_agent_authenticated(store: ConfigStore, project, env, agent, cred, d
         sys.exit(1)
 
 
-def _run_agent_adapt_session(store: ConfigStore, project, env, sec, agent):
+def _run_agent_adapt_session(store: ConfigStore, project, env, sec, agent, build_error: str = ""):
     """Start an adapt container session and ask the agent to update image-request.yaml."""
     print("[adapt] Preparing runtime image...")
     image_name = _ensure_runtime_image(store, project, sec, agent)
@@ -577,9 +616,14 @@ def _run_agent_adapt_session(store: ConfigStore, project, env, sec, agent):
     print("[adapt] Syncing credentials and checking auth...")
     _ensure_agent_authenticated(store, project, env, agent, cred, docker_cmd_base)
 
-    print(f"[adapt] {agent.name} is generating wishlist...")
+    if build_error:
+        print(f"[adapt] {agent.name} is revising image request after build failure...")
+    else:
+        print(f"[adapt] {agent.name} is generating wishlist...")
     run_cmd = _noninteractive_run_command(docker_cmd_base, project.name, "agent")
-    run_cmd.extend(_agent_adapt_command(agent, project.name))
+    adapt_cmd = _agent_adapt_command(agent, project.name, build_error)
+    print(f"[adapt] Agent command: {_shell_join(adapt_cmd)}")
+    run_cmd.extend(adapt_cmd)
     result = subprocess.run(run_cmd, capture_output=True, text=True)
     summary_lines = _summarize_agent_output(result.stdout, result.stderr)
     if summary_lines:
@@ -627,17 +671,23 @@ def _print_project_image_summary(project):
     print(f"  fromImage:    {img.from_image or '(none)'}")
     print(f"  baseImage:    {img.base_image or '(none)'}")
     print(f"  packages:     {', '.join(img.extra_packages) if img.extra_packages else '(none)'}")
-    print(f"  commands:     {len(img.extra_commands)} command(s)")
+    extra_cmds = list(img.extra_commands or [])
+    if extra_cmds:
+        print(f"  commands ({len(extra_cmds)}):")
+        for cmd in extra_cmds:
+            print(f"    - {cmd}")
+    else:
+        print(f"  commands:     (none)")
 
 
-def _build_project_image(store: ConfigStore, project, agent):
-    """Build the adapted project image immediately."""
+def _build_project_image(store: ConfigStore, project, agent) -> str:
+    """Build the adapted project image. Returns error output on failure, empty string on success."""
     g = store.load_global()
     image_name_base = g.get("imageName", "skua-base")
     image_name = image_name_for_project(image_name_base, project)
     if image_exists(image_name):
         print(f"Image already exists: {image_name}")
-        return
+        return ""
 
     container_dir = store.get_container_dir()
     if container_dir is None:
@@ -664,7 +714,7 @@ def _build_project_image(store: ConfigStore, project, agent):
     print(f"  Base image: {resolved_base_image}")
     if extra_packages:
         print(f"  Packages:   {', '.join(extra_packages)}")
-    success = build_image(
+    success, error_output = build_image(
         container_dir=container_dir,
         image_name=image_name,
         security=build_security,
@@ -675,5 +725,6 @@ def _build_project_image(store: ConfigStore, project, agent):
         quiet=True,
     )
     if not success:
-        print(f"Error: failed to build image '{image_name}'.")
-        sys.exit(1)
+        print(f"[adapt] Image build failed: {image_name}")
+        return error_output or "Docker build failed."
+    return ""

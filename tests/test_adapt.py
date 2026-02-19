@@ -110,7 +110,8 @@ class TestProjectAdaptHelpers(unittest.TestCase):
         self.assertIn("fromImage: (unchanged)", lines)
         self.assertIn("baseImage: debian:bookworm-slim", lines)
         self.assertIn("packages: git, jq", lines)
-        self.assertIn("commands: 1 command(s)", lines)
+        self.assertIn("command: npm ci", lines)
+        self.assertNotIn("commands: 1 command(s)", lines)
 
     def test_agent_prompt_describes_container_and_project_file_inference(self):
         from skua.commands.adapt import _agent_prompt
@@ -167,6 +168,7 @@ class TestAdaptCommand(unittest.TestCase):
         build: bool = False,
         show_prompt: bool = False,
         discover: bool = False,
+        force: bool = False,
     ):
         return argparse.Namespace(
             name=name,
@@ -180,6 +182,7 @@ class TestAdaptCommand(unittest.TestCase):
             clear=False,
             write_only=False,
             build=build,
+            force=force,
         )
 
     def test_cmd_adapt_show_prompt_prints_and_exits_early(self):
@@ -418,12 +421,66 @@ class TestAdaptCommand(unittest.TestCase):
             with (
                 mock.patch("skua.commands.adapt.ConfigStore", return_value=store),
                 mock.patch("skua.commands.adapt._run_agent_adapt_session") as mock_session,
-                mock.patch("skua.commands.adapt._build_project_image") as mock_build,
+                mock.patch("skua.commands.adapt._build_project_image", return_value="") as mock_build,
             ):
                 cmd_adapt(self._adapt_args("proj", discover=True))
 
             mock_session.assert_called_once()
             mock_build.assert_called_once()
+
+    def test_cmd_adapt_discover_retries_build_after_agent_revises_request(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = Path(tmpdir) / "repo"
+            project_dir.mkdir()
+            store = self._new_store(Path(tmpdir) / "cfg")
+            store.save_resource(Project(name="proj", directory=str(project_dir), agent="codex"))
+
+            _, request_path = ensure_adapt_workspace(project_dir, "proj", "codex")
+            with open(request_path, "w") as f:
+                yaml.dump(
+                    {"schemaVersion": 1, "status": "ready", "packages": ["git"]},
+                    f, default_flow_style=False, sort_keys=False,
+                )
+
+            # Simulate: first build fails, agent updates request, second build succeeds
+            build_calls = []
+            def fake_build(store, project, agent):
+                build_calls.append(len(build_calls))
+                if len(build_calls) == 1:
+                    return "RUN bad-command: not found"
+                return ""
+
+            session_calls = []
+            def fake_session(store, project, env, sec, agent, build_error=""):
+                session_calls.append(build_error)
+                if build_error:
+                    # Agent revises request to fix the build error
+                    packages = ["git", "make", "cmake"]
+                else:
+                    # Initial discover
+                    packages = ["git", "make"]
+                with open(request_path, "w") as f:
+                    yaml.dump(
+                        {"schemaVersion": 1, "status": "ready", "packages": packages},
+                        f, default_flow_style=False, sort_keys=False,
+                    )
+
+            with (
+                mock.patch("skua.commands.adapt.ConfigStore", return_value=store),
+                mock.patch("skua.commands.adapt._run_agent_adapt_session", side_effect=fake_session),
+                mock.patch("skua.commands.adapt._build_project_image", side_effect=fake_build),
+            ):
+                cmd_adapt(self._adapt_args("proj", discover=True))
+
+            # Agent session called twice: initial discover + error retry
+            self.assertEqual(2, len(session_calls))
+            self.assertEqual("", session_calls[0])
+            self.assertIn("not found", session_calls[1])
+            # Build attempted twice
+            self.assertEqual(2, len(build_calls))
+            # Revised request was applied (packages include 'make')
+            updated = store.load_project("proj")
+            self.assertIn("make", updated.image.extra_packages)
 
     def test_cmd_adapt_respects_user_rejection_before_apply(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -508,6 +565,7 @@ class TestAdaptCommand(unittest.TestCase):
                 extra_command=[],
                 build=False,
                 apply_only=False,
+                force=False,
             )
 
             with mock.patch("skua.commands.adapt.cmd_adapt") as mock_cmd:

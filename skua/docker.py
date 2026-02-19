@@ -494,9 +494,11 @@ def build_image(
                     print("Docker build failed. Last output:")
                     for line in lines[-12:]:
                         print(f"  {line}")
+                return False, combined
+            return True, ""
         else:
             result = subprocess.run(cmd)
-        return result.returncode == 0
+        return result.returncode == 0, ""
 
     finally:
         if build_path.exists():

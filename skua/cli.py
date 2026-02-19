@@ -42,6 +42,11 @@ def _add_adapt_args(parser):
     parser.add_argument("--clear", action="store_true", help="Clear project image customization")
     parser.add_argument("--write-only", action="store_true", help="Only create adapt files; do not apply")
     parser.add_argument("--build", action="store_true", help="Build adapted image immediately")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Skip approval prompts (auto-approve wishlist and build-error retry)",
+    )
 
 
 def main():

@@ -516,7 +516,7 @@ class TestBuildCommandImageDrift(unittest.TestCase):
             mock_required.return_value = [project]
             mock_exists.return_value = True
             mock_match.return_value = False
-            mock_build.return_value = True
+            mock_build.return_value = (True, "")
 
             cmd_build(argparse.Namespace())
             mock_build.assert_called_once()
@@ -537,7 +537,7 @@ class TestBuildCommandImageDrift(unittest.TestCase):
             mock_required.return_value = [project]
             mock_exists.return_value = True
             mock_match.return_value = True
-            mock_build.return_value = True
+            mock_build.return_value = (True, "")
 
             cmd_build(argparse.Namespace())
             mock_build.assert_not_called()
