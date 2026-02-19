@@ -145,14 +145,18 @@ def cmd_add(args):
             print("No agent presets installed. Run 'skua init' first.")
         sys.exit(1)
 
-    # Credential selection (required)
+    # Credential selection
+    no_credential = getattr(args, "no_credential", False)
     cred_name = getattr(args, "credential", None) or ""
     available_creds = sorted(
         c for c in store.list_resources("Credential")
         if _cred_matches_agent(store, c, agent_name)
     )
 
-    if cred_name:
+    if no_credential:
+        cred_name = ""
+        print("Skipping credential setup. Log in to the agent inside the container before use.")
+    elif cred_name:
         cred = store.load_credential(cred_name)
         if cred is None:
             print(f"Error: Credential '{cred_name}' not found.")
@@ -167,7 +171,7 @@ def cmd_add(args):
     elif available_creds:
         cred_name = _select_existing_credential(available_creds, quick, args.no_prompt)
     else:
-        cred_name = _auto_add_local_credential(store, agent_name, agent)
+        cred_name = _auto_add_local_credential(store, agent_name, agent, quick, args.no_prompt)
 
     project = Project(
         name=name,
@@ -251,11 +255,23 @@ def _select_existing_credential(available_creds: list, quick: bool, no_prompt: b
     return select_option("Select credential:", available_creds, default_index=0)
 
 
-def _auto_add_local_credential(store, agent_name: str, agent) -> str:
+def _auto_add_local_credential(store, agent_name: str, agent, quick: bool = False, no_prompt: bool = False) -> str:
     """Detect local credentials for agent and create a named credential resource."""
     sources = resolve_credential_sources(None, agent)
     found = [str(src) for src, _ in sources if src.is_file()]
     if not found:
+        if not quick and not no_prompt:
+            login_cmd = agent.auth.login_command or f"{agent_name} login"
+            print(f"\nNo local credentials detected for agent '{agent_name}'.")
+            print(f"  To add credentials: run '{login_cmd}' or 'skua credential add'.")
+            choice = select_option(
+                "How would you like to proceed?",
+                ["Skip credential setup (log in inside the container)", f"Abort and run '{login_cmd}' first"],
+                default_index=0,
+            )
+            if choice.startswith("Skip"):
+                print("Skipping credential setup. Log in to the agent inside the container before use.")
+                return ""
         print(f"Error: No local credentials detected for agent '{agent_name}'.")
         print(f"Run '{agent.auth.login_command or f'{agent_name} login'}' first, then retry.")
         print(

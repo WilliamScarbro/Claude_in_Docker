@@ -8,7 +8,22 @@ from skua import __version__
 
 
 def _add_adapt_args(parser):
-    parser.add_argument("name", help="Project name to adapt")
+    parser.add_argument("name", nargs="?", help="Project name to adapt")
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Apply pending image-request changes for all projects",
+    )
+    parser.add_argument(
+        "--show-prompt",
+        action="store_true",
+        help="Show the resolved agent prompt/command for this project and exit",
+    )
+    parser.add_argument(
+        "--discover",
+        action="store_true",
+        help="Run automated agent discovery to generate/update image-request.yaml before applying",
+    )
     parser.add_argument("--base-image", help="Override generated Dockerfile base image")
     parser.add_argument("--from-image", help="Adapt an existing image as Dockerfile parent")
     parser.add_argument("--package", action="append", default=[], help="Apt package to add (repeatable)")
@@ -22,7 +37,7 @@ def _add_adapt_args(parser):
     parser.add_argument(
         "--apply-only",
         action="store_true",
-        help="Skip automated agent run and apply existing image-request.yaml",
+        help="Alias for default behavior: apply existing image-request.yaml without discovery",
     )
     parser.add_argument("--clear", action="store_true", help="Clear project image customization")
     parser.add_argument("--write-only", action="store_true", help="Only create adapt files; do not apply")
@@ -57,6 +72,8 @@ def main():
     p_add.add_argument("--security", help="Security profile name (default: from global)")
     p_add.add_argument("--agent", help="Agent config name (default: from global)")
     p_add.add_argument("--credential", help="Named credential set to use for this project")
+    p_add.add_argument("--no-credential", action="store_true",
+                        help="Skip credential setup (use when the agent will authenticate inside the container)")
     p_add.add_argument("--quick", action="store_true",
                         help="Use all defaults, skip interactive prompts")
     p_add.add_argument("--no-prompt", action="store_true",

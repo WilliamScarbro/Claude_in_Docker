@@ -29,6 +29,7 @@ class TestAddCredentialSelection(unittest.TestCase):
             security=None,
             agent=None,
             credential=None,
+            no_credential=False,
             quick=True,
             no_prompt=True,
         )
@@ -116,6 +117,38 @@ class TestAddCredentialSelection(unittest.TestCase):
             self.assertIsInstance(saved[1], Project)
             self.assertEqual(saved[1].credential, "imported-cred")
 
+    @mock.patch("skua.commands.add.select_option", return_value="Skip credential setup (log in inside the container)")
+    @mock.patch("skua.commands.add.find_ssh_keys", return_value=[])
+    @mock.patch("builtins.input", return_value="")
+    @mock.patch("skua.commands.add.resolve_credential_sources")
+    @mock.patch("skua.commands.add.ConfigStore")
+    def test_interactive_skip_when_no_credentials_and_no_local_found(
+        self, MockStore, mock_sources, _mock_input, _mock_keys, mock_select
+    ):
+        from skua.commands.add import cmd_add
+
+        store = MockStore.return_value
+        store.is_initialized.return_value = True
+        store.load_project.return_value = None
+        store.load_global.return_value = {"defaults": {}}
+        store.load_agent.return_value = self._claude_agent()
+        store.load_environment.return_value = None
+        store.list_resources.side_effect = (
+            lambda kind: ["claude"] if kind == "AgentConfig" else []
+        )
+        store.load_credential.return_value = None
+        mock_sources.return_value = [(Path("/missing/.credentials.json"), ".credentials.json")]
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_add(self._args(quick=False, no_prompt=False, agent="claude"))
+
+        saved = [c.args[0] for c in store.save_resource.call_args_list]
+        self.assertEqual(len(saved), 1)
+        self.assertIsInstance(saved[0], Project)
+        self.assertEqual(saved[0].credential, "")
+        self.assertIn("Skipping credential setup", buf.getvalue())
+
     @mock.patch("skua.commands.add.resolve_credential_sources")
     @mock.patch("skua.commands.add.ConfigStore")
     def test_errors_when_no_credentials_exist_and_no_local_found(self, MockStore, mock_sources):
@@ -138,6 +171,30 @@ class TestAddCredentialSelection(unittest.TestCase):
             cmd_add(self._args())
         self.assertEqual(ctx.exception.code, 1)
         store.save_resource.assert_not_called()
+
+    @mock.patch("skua.commands.add.ConfigStore")
+    def test_no_credential_flag_skips_credential_setup(self, MockStore):
+        from skua.commands.add import cmd_add
+
+        store = MockStore.return_value
+        store.is_initialized.return_value = True
+        store.load_project.return_value = None
+        store.load_global.return_value = {"defaults": {}}
+        store.load_agent.return_value = self._claude_agent()
+        store.load_environment.return_value = None
+        store.list_resources.side_effect = (
+            lambda kind: ["claude"] if kind == "AgentConfig" else []
+        )
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_add(self._args(no_credential=True))
+
+        saved = [c.args[0] for c in store.save_resource.call_args_list]
+        self.assertEqual(len(saved), 1)
+        self.assertIsInstance(saved[0], Project)
+        self.assertEqual(saved[0].credential, "")
+        self.assertIn("Skipping credential setup", buf.getvalue())
 
     @mock.patch("skua.commands.add.select_option")
     @mock.patch("skua.commands.add.find_ssh_keys")
@@ -185,8 +242,9 @@ class TestAddCredentialSelection(unittest.TestCase):
 
 class TestListColumns(unittest.TestCase):
     @mock.patch("skua.commands.list_cmd.get_running_skua_containers")
+    @mock.patch("skua.commands.list_cmd._has_pending_adapt_request", return_value=True)
     @mock.patch("skua.commands.list_cmd.ConfigStore")
-    def test_list_default_shows_minimal_columns(self, MockStore, mock_running):
+    def test_list_default_shows_minimal_columns(self, MockStore, _mock_pending, mock_running):
         from skua.commands.list_cmd import cmd_list
 
         store = MockStore.return_value
@@ -216,6 +274,9 @@ class TestListColumns(unittest.TestCase):
         self.assertNotIn("CREDENTIAL", out)
         self.assertNotIn("SECURITY", out)
         self.assertNotIn("NETWORK", out)
+        self.assertIn("running*", out)
+        self.assertIn("1 pending adapt", out)
+        self.assertIn("* pending image-request changes", out)
 
     @mock.patch("skua.commands.list_cmd.get_running_skua_containers")
     @mock.patch("skua.commands.list_cmd.ConfigStore")
@@ -250,3 +311,88 @@ class TestListColumns(unittest.TestCase):
         self.assertIn("cred-main", out)
         self.assertIn("open", out)
         self.assertIn("bridge", out)
+
+    @mock.patch("skua.commands.list_cmd.get_running_skua_containers")
+    @mock.patch("skua.commands.list_cmd.ConfigStore")
+    def test_list_checks_remote_host_status(self, MockStore, mock_running):
+        from skua.commands.list_cmd import cmd_list
+
+        store = MockStore.return_value
+        store.list_resources.return_value = ["local", "qar"]
+
+        projects = {
+            "local": Project(
+                name="local",
+                directory="/tmp/local",
+                environment="local-docker",
+                security="open",
+                agent="claude",
+            ),
+            "qar": Project(
+                name="qar",
+                repo="git@github.com:org/repo.git",
+                host="qar",
+                environment="local-docker",
+                security="open",
+                agent="claude",
+            ),
+        }
+        store.resolve_project.side_effect = lambda name: projects[name]
+        store.load_environment.return_value = SimpleNamespace(
+            network=SimpleNamespace(mode="bridge")
+        )
+
+        mock_running.side_effect = [
+            [],
+            ["skua-qar"],
+        ]
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_list(argparse.Namespace())
+        out = buf.getvalue()
+
+        self.assertIn("SSH:qar", out)
+        self.assertIn("running", out)
+        self.assertIn("2 project(s), 1 running", out)
+        self.assertEqual(2, mock_running.call_count)
+        mock_running.assert_any_call()
+        mock_running.assert_any_call(host="qar")
+
+    @mock.patch("skua.commands.list_cmd.get_running_skua_containers")
+    @mock.patch("skua.commands.list_cmd.ConfigStore")
+    def test_list_caches_remote_host_status_per_host(self, MockStore, mock_running):
+        from skua.commands.list_cmd import cmd_list
+
+        store = MockStore.return_value
+        store.list_resources.return_value = ["qar-a", "qar-b"]
+
+        def _project(name):
+            return Project(
+                name=name,
+                repo="git@github.com:org/repo.git",
+                host="qar",
+                environment="local-docker",
+                security="open",
+                agent="claude",
+            )
+
+        store.resolve_project.side_effect = lambda name: _project(name)
+        store.load_environment.return_value = SimpleNamespace(
+            network=SimpleNamespace(mode="bridge")
+        )
+
+        mock_running.side_effect = [
+            [],
+            ["skua-qar-a", "skua-qar-b"],
+        ]
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            cmd_list(argparse.Namespace())
+        out = buf.getvalue()
+
+        self.assertIn("2 project(s), 2 running", out)
+        self.assertEqual(2, mock_running.call_count)
+        mock_running.assert_any_call()
+        mock_running.assert_any_call(host="qar")
