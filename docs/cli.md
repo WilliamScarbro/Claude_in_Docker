@@ -36,10 +36,15 @@ skua config --tool-dir /path/to/skua
 
 ### `skua adapt <name>`
 
-Start the project container, run the configured agent to update `.skua/image-request.yaml`, apply the request into project config, and build the updated project image.
+Apply latent `.skua/image-request.yaml` updates into project image config.
+Use `--discover` to run the configured agent first and generate/update that wishlist automatically.
+Skua also creates `AGENTS.md` and `CLAUDE.md` in the project root to guide interactive agent sessions.
 
 ```bash
-skua adapt myapp                    # run agent + apply request + build adapted image
+skua adapt myapp                    # apply latent wishlist from .skua/image-request.yaml
+skua adapt --all                    # apply latent wishlist updates for all pending projects
+skua adapt myapp --show-prompt      # print resolved agent prompt/command and exit
+skua adapt myapp --discover         # run agent discovery + apply + build adapted image
 skua adapt myapp --build            # apply + build now
 skua adapt myapp --apply-only       # skip agent run; apply existing request file
 skua adapt myapp --from-image ghcr.io/acme/app:dev
@@ -48,7 +53,7 @@ skua adapt myapp --command "npm ci" --command "npm run build"
 skua adapt myapp --clear            # remove project-specific image customization
 ```
 
-If the agent is not logged in, `skua adapt` exits with an error and asks you to authenticate via `skua run <name>`.
+If the agent is not logged in, `skua adapt --discover` exits with an error and asks you to authenticate via `skua run <name>`.
 
 ### `skua add <name>`
 

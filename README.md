@@ -30,10 +30,12 @@ skua add myapp --repo git@github.com:your-org/myapp.git
 ```
 
 ### 3. (Optional) Adapt a project-specific image
-Each project gets a `.skua/` adapt guide and image request template:
+Each project gets adapt artifacts and agent-instruction files:
 
 - `.skua/ADAPT.md`
 - `.skua/image-request.yaml`
+- `AGENTS.md`
+- `CLAUDE.md`
 
 Workflow:
 
