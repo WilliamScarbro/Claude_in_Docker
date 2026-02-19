@@ -558,7 +558,21 @@ def _agent_adapt_command(agent, project_name: str, build_error: str = "") -> lis
         if _template_uses_shell(template):
             return ["bash", "-lc", rendered]
         try:
-            return _normalize_adapt_argv(agent_name, shlex.split(rendered))
+            sentinel_prompt = "__SKUA_PROMPT__"
+            sentinel_prompt_shell = "__SKUA_PROMPT_SHELL__"
+            rendered_with_sentinels = template.format(
+                prompt=sentinel_prompt,
+                prompt_shell=sentinel_prompt_shell,
+                project=project_name,
+            )
+            argv = shlex.split(rendered_with_sentinels)
+            replaced = []
+            for token in argv:
+                if sentinel_prompt in token or sentinel_prompt_shell in token:
+                    token = token.replace(sentinel_prompt_shell, prompt)
+                    token = token.replace(sentinel_prompt, prompt)
+                replaced.append(token)
+            return _normalize_adapt_argv(agent_name, replaced)
         except ValueError as exc:
             print(f"Error: Invalid adapt command for agent '{agent.name}': {exc}")
             sys.exit(1)

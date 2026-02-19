@@ -649,6 +649,23 @@ class TestAdaptCommand(unittest.TestCase):
         self.assertIn("status: ready", cmd[-1])
         self.assertIn(".skua/image-request.yaml", cmd[-1])
 
+    def test_agent_adapt_command_template_without_quotes_keeps_prompt_single_arg(self):
+        from skua.commands.adapt import _agent_adapt_command, _agent_prompt
+
+        agent = AgentConfig(
+            name="claude",
+            runtime=AgentRuntimeSpec(
+                command="claude",
+                adapt_command="claude -p {prompt}",
+            ),
+        )
+
+        prompt = _agent_prompt("proj", "claude")
+        cmd = _agent_adapt_command(agent, "proj")
+        prompt_index = cmd.index("-p") + 1
+        self.assertEqual(prompt, cmd[prompt_index])
+        self.assertIn("status: ready", cmd[prompt_index])
+
     def test_agent_adapt_command_default_claude_includes_permission_flag(self):
         from skua.commands.adapt import _agent_adapt_command
 
