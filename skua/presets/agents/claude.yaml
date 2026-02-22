@@ -21,4 +21,4 @@ spec:
     files:
       - .credentials.json
       - .claude.json
-    login_command: "claude login"
+    login_command: "claude /login"

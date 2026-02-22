@@ -254,7 +254,7 @@ spec:
     files:                    # files that constitute credentials
       - .credentials.json
       - .claude.json
-    loginCommand: "claude login"
+    loginCommand: "claude /login"
 
   permissions:
     # Agent-specific permission presets (e.g., Claude's settings.json)

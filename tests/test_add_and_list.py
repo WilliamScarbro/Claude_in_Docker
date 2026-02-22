@@ -43,7 +43,7 @@ class TestAddCredentialSelection(unittest.TestCase):
             auth=AgentAuthSpec(
                 dir=".claude",
                 files=[".credentials.json", ".claude.json"],
-                login_command="claude login",
+                login_command="claude /login",
             ),
         )
 

@@ -63,7 +63,7 @@ claude
 First run may require login:
 
 ```bash
-claude login
+claude /login
 ```
 
 Credentials are persisted, so later runs usually do not require login again.
